@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Enten | Build Above The Noise</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@100;400&family=Playfair+Display:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" async></script>
+
+    <style>
+      :root {
+        --c-navy: #172439;
+        --c-indigo: #262b45;
+        --c-plum: #3d2938;
+        --c-base: #0c0d12;
+        --c-cloud-white: #f4f4f2;
+        --c-cloud-muted: rgba(244, 244, 242, 0.66);
+        --c-cloud-faint: rgba(244, 244, 242, 0.22);
+        --c-gold: #efa143;
+        --c-teal: #4cb2a8;
+        --font-display: "Playfair Display", Georgia, "Times New Roman", serif;
+        --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        --layout-pad: clamp(24px, 6vw, 96px);
+        --section-pad: clamp(88px, 14vh, 180px);
+        --ease-float: cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        width: 100%;
+        overflow-x: hidden;
+        background-color: var(--c-base);
+        color: var(--c-cloud-white);
+        cursor: crosshair;
+        font-family: var(--font-sans);
+        letter-spacing: 0;
+        -moz-osx-font-smoothing: grayscale;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      ::selection {
+        background: var(--c-cloud-white);
+        color: var(--c-base);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      #webgl-container {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        overflow: hidden;
+        background: var(--c-base);
+        pointer-events: none;
+      }
+
+      #webgl-container canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #webgl-container.fallback-bg {
+        background: linear-gradient(180deg, #101827, #171a2a 42%, #211620 74%, var(--c-base));
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family: var(--font-display);
+        font-weight: 400;
+        letter-spacing: 0;
+        line-height: 1.05;
+      }
+
+      .t-display-xl {
+        font-size: 4rem;
+      }
+
+      .t-display-lg {
+        font-size: 3rem;
+      }
+
+      .t-display-md {
+        font-size: 2.35rem;
+      }
+
+      .t-body-lg {
+        max-width: 600px;
+        color: var(--c-cloud-muted);
+        font-size: 1.2rem;
+        font-weight: 300;
+        line-height: 1.6;
+      }
+
+      .t-body {
+        color: var(--c-cloud-muted);
+        font-size: 1rem;
+        font-weight: 300;
+        line-height: 1.6;
+      }
+
+      .t-mono {
+        color: rgba(244, 244, 242, 0.56);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .t-mono-highlight {
+        color: var(--c-cloud-white);
+        font-weight: 400;
+      }
+
+      .sys-label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      .sys-label::before {
+        display: block;
+        width: 12px;
+        height: 1px;
+        background: var(--c-gold);
+        content: "";
+      }
+
+      .hairline-rule {
+        width: 100%;
+        height: 1px;
+        margin: clamp(32px, 4vw, 64px) 0;
+        background: var(--c-cloud-faint);
+      }
+
+      .global-nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 100;
+        display: flex;
+        width: 100%;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 28px;
+        padding: var(--layout-pad);
+        mix-blend-mode: difference;
+        transition:
+          opacity 0.6s var(--ease-float),
+          visibility 0.6s var(--ease-float);
+      }
+
+      .logo {
+        flex: 0 0 auto;
+        font-family: var(--font-display);
+        font-size: 1.5rem;
+        font-style: italic;
+        letter-spacing: 0.05em;
+        line-height: 1;
+      }
+
+      .nav-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 20px clamp(22px, 3vw, 52px);
+        list-style: none;
+      }
+
+      .nav-links a {
+        position: relative;
+        color: var(--c-cloud-white);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+      }
+
+      .nav-links a::after {
+        position: absolute;
+        bottom: -4px;
+        left: 0;
+        width: 0;
+        height: 1px;
+        background: var(--c-cloud-white);
+        content: "";
+        transition: width 0.6s var(--ease-float);
+      }
+
+      .nav-links a:hover::after,
+      .nav-links a:focus-visible::after {
+        width: 100%;
+      }
+
+      .altitude-meter {
+        position: fixed;
+        top: 50%;
+        right: clamp(24px, 3vw, 48px);
+        z-index: 10;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+        opacity: 0.5;
+        transform: translateY(-50%);
+      }
+
+      .alt-line {
+        width: 1px;
+        height: 100px;
+        background: linear-gradient(to bottom, transparent, var(--c-cloud-white), transparent);
+      }
+
+      .container {
+        width: min(100%, 1800px);
+        margin: 0 auto;
+        padding: 0 var(--layout-pad);
+      }
+
+      section {
+        position: relative;
+        display: flex;
+        min-height: 100svh;
+        flex-direction: column;
+        justify-content: center;
+        padding: var(--section-pad) 0;
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(40px);
+        transition:
+          opacity 1.4s var(--ease-float),
+          transform 1.4s var(--ease-float);
+      }
+
+      .reveal.active {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      #hero {
+        min-height: 92svh;
+        align-items: center;
+        padding-top: clamp(130px, 20vh, 220px);
+        text-align: center;
+      }
+
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 14px 24px;
+        margin-top: clamp(32px, 4vw, 64px);
+      }
+
+      #developers {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        align-items: end;
+        gap: clamp(56px, 10vw, 160px);
+      }
+
+      .vision-text {
+        padding-bottom: 10vh;
+      }
+
+      .data-card {
+        margin-top: clamp(32px, 4vw, 64px);
+        padding-left: clamp(24px, 3vw, 48px);
+        border-left: 1px solid var(--c-cloud-faint);
+      }
+
+      #system {
+        display: grid;
+        grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+        gap: clamp(56px, 8vw, 128px);
+      }
+
+      .tech-panel {
+        position: relative;
+        padding: clamp(28px, 4vw, 64px);
+        border: 1px solid var(--c-cloud-faint);
+        background: rgba(244, 244, 242, 0.03);
+        backdrop-filter: blur(10px);
+      }
+
+      .tech-panel::before,
+      .tech-panel::after {
+        position: absolute;
+        color: rgba(244, 244, 242, 0.46);
+        content: "+";
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      .tech-panel::before {
+        top: 8px;
+        left: 8px;
+      }
+
+      .tech-panel::after {
+        right: 8px;
+        bottom: 8px;
+      }
+
+      .code-snippet {
+        margin-top: 24px;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 0.85rem;
+        line-height: 1.8;
+        overflow-wrap: anywhere;
+      }
+
+      .code-snippet span {
+        color: var(--c-teal);
+      }
+
+      .code-snippet .keyword {
+        color: var(--c-gold);
+      }
+
+      #resources {
+        min-height: 80svh;
+        justify-content: flex-end;
+        padding-bottom: var(--layout-pad);
+      }
+
+      .ecosystem-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1px;
+        border: 1px solid var(--c-cloud-faint);
+        background: var(--c-cloud-faint);
+      }
+
+      .eco-module {
+        display: block;
+        min-height: 260px;
+        padding: clamp(28px, 4vw, 64px);
+        background: rgba(12, 13, 18, 0.92);
+        cursor: pointer;
+        transition:
+          background 0.4s var(--ease-float),
+          color 0.4s var(--ease-float);
+      }
+
+      .eco-module:hover,
+      .eco-module:focus-visible {
+        background: rgba(244, 244, 242, 0.05);
+      }
+
+      .eco-module h3 {
+        margin-bottom: 16px;
+        font-size: 1.5rem;
+      }
+
+      .footer-bottom {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        margin-top: clamp(48px, 6vw, 96px);
+        padding-top: 24px;
+        border-top: 1px solid var(--c-cloud-faint);
+      }
+
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 14px 24px;
+      }
+
+      .crosshair-h,
+      .crosshair-v {
+        position: fixed;
+        z-index: 999;
+        background: rgba(244, 244, 242, 0.1);
+        pointer-events: none;
+      }
+
+      .crosshair-h {
+        left: 0;
+        width: 100vw;
+        height: 1px;
+      }
+
+      .crosshair-v {
+        top: 0;
+        width: 1px;
+        height: 100vh;
+      }
+
+      @media (min-width: 760px) {
+        .t-display-xl {
+          font-size: 6.5rem;
+        }
+
+        .t-display-lg {
+          font-size: 4.5rem;
+        }
+
+        .t-display-md {
+          font-size: 3.25rem;
+        }
+      }
+
+      @media (min-width: 1180px) {
+        .t-display-xl {
+          font-size: 9rem;
+        }
+
+        .t-display-lg {
+          font-size: 5.75rem;
+        }
+
+        .t-display-md {
+          font-size: 4rem;
+        }
+      }
+
+      @media (max-width: 1024px) {
+        .nav-links {
+          display: none;
+        }
+
+        .global-nav {
+          align-items: center;
+        }
+
+        .altitude-meter {
+          display: none;
+        }
+
+        #developers,
+        #system,
+        .ecosystem-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .vision-text {
+          padding-bottom: 0;
+        }
+
+        .tech-panel {
+          transition-delay: 0s !important;
+        }
+      }
+
+      @media (max-width: 640px) {
+        body {
+          cursor: auto;
+        }
+
+        .global-nav {
+          padding-top: 24px;
+        }
+
+        .t-display-xl {
+          font-size: 3.7rem;
+        }
+
+        .t-display-lg {
+          font-size: 2.65rem;
+        }
+
+        .t-body-lg {
+          font-size: 1.08rem;
+        }
+
+        .t-mono {
+          font-size: 0.68rem;
+        }
+
+        .crosshair-h,
+        .crosshair-v {
+          display: none;
+        }
+
+        .footer-bottom {
+          flex-direction: column;
+        }
+
+        .footer-links {
+          justify-content: flex-start;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .reveal,
+        .global-nav,
+        .eco-module,
+        .nav-links a::after {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="webgl-container" aria-hidden="true"></div>
+
+    <div class="crosshair-h" id="ch-h" aria-hidden="true"></div>
+    <div class="crosshair-v" id="ch-v" aria-hidden="true"></div>
+
+    <header class="global-nav">
+      <a class="logo" href="./index.html" aria-label="Enten home">Enten.</a>
+      <nav aria-label="Primary">
+        <ul class="nav-links">
+          <li><a href="#developers">Developers</a></li>
+          <li><a href="#system">System</a></li>
+          <li><a href="#docs">Documentation</a></li>
+          <li><a href="./auction.html">Auctions</a></li>
+          <li><a href="./swap.html">Portal</a></li>
+          <li><a href="#github">GitHub</a></li>
+        </ul>
+      </nav>
+      <div class="t-mono">[ v.2.4.0 ]</div>
+    </header>
+
+    <div class="altitude-meter" aria-hidden="true">
+      <div class="t-mono">ALT</div>
+      <div class="alt-line"></div>
+      <div class="t-mono t-mono-highlight" id="alt-val">84,000</div>
+    </div>
+
+    <main class="container">
+      <section id="hero">
+        <div class="reveal">
+          <div class="sys-label t-mono">SYS_01 // PERSPECTIVE</div>
+          <h1 class="t-display-xl">Build Above<br>The Noise.</h1>
+          <div class="hero-meta">
+            <div class="t-mono">[ LAT 45.9 // LON 12.4 ]</div>
+            <div class="t-mono">ELEVATION SECURED</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="developers">
+        <div class="vision-text reveal">
+          <h2 class="t-display-lg">See Further.</h2>
+          <div class="hairline-rule"></div>
+          <p class="t-body-lg">
+            A focused interface for Enten market systems. Track auction state, connect a wallet,
+            review contract-backed values, and route supported token actions without hiding the
+            mechanics that matter.
+          </p>
+          <div class="data-card">
+            <div class="t-mono" style="margin-bottom: 8px;">CORE TENET</div>
+            <p class="t-body">Readable contract data before wallet action.</p>
+          </div>
+        </div>
+
+        <div aria-hidden="true"></div>
+      </section>
+
+      <section id="system">
+        <div class="reveal">
+          <div class="sys-label t-mono">SYS_02 // ARCHITECTURE</div>
+          <h2 class="t-display-md">Routing &amp;<br>Execution</h2>
+          <p class="t-body" style="margin-top: 24px; max-width: 400px;">
+            Modular, flexible systems for teams building in demanding onchain environments. Enten is
+            designed around composable primitives that can adapt to the workflows, markets, and actions
+            developers need to support over time.
+          </p>
+        </div>
+
+        <div class="tech-panel reveal" style="transition-delay: 0.2s;">
+          <div class="t-mono">ENTEN_RUNTIME_ENV</div>
+          <div class="hairline-rule" style="margin: 16px 0;"></div>
+          <div class="code-snippet" aria-label="Enten runtime environment concept in Rust-style syntax">
+            <span class="keyword">use</span> enten_core::{Provider, Route};<br><br>
+            <span class="keyword">let</span> system = Provider::new(Config {<br>
+            &nbsp;&nbsp;elevation: <span>"maximum"</span>,<br>
+            &nbsp;&nbsp;noise_reduction: <span>true</span>,<br>
+            &nbsp;&nbsp;layer: <span>0x04</span>,<br>
+            });<br><br>
+            system.mount(Route::Optimized).await?;<br>
+            <span style="color: var(--c-cloud-faint);">// Sequence initialized. Environment stable.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="resources">
+        <div class="reveal">
+          <div class="sys-label t-mono">SYS_03 // PARTICIPATION</div>
+          <div class="ecosystem-grid">
+            <a class="eco-module" href="./swap.html">
+              <div class="t-mono" style="margin-bottom: 24px; color: var(--c-gold);">ACTIVATE</div>
+              <h3>Enter the Portal</h3>
+              <p class="t-body">Open the swap interface for supported assets, wallet balances, and configured route execution.</p>
+            </a>
+
+            <a class="eco-module" href="./auction.html">
+              <div class="t-mono" style="margin-bottom: 24px; color: var(--c-teal);">MARKETS</div>
+              <h3>System Auctions</h3>
+              <p class="t-body">View live auction price, lot size, remaining supply, backing, and wallet-ready buy flow.</p>
+            </a>
+
+            <a class="eco-module" id="docs" href="#system">
+              <div class="t-mono" style="margin-bottom: 24px;">RESOURCES</div>
+              <h3>Documentation</h3>
+              <p class="t-body">Comprehensive guides to architectural concepts, integration patterns, and contract logic.</p>
+            </a>
+          </div>
+
+          <div class="footer-bottom t-mono">
+            <div>(C) ENTEN PROTOCOL 2026</div>
+            <div class="footer-links" id="github">
+              <a href="#github">TWITTER</a>
+              <a href="#github">DISCORD</a>
+              <a href="#github">TERMS</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        "use strict";
+
+        function cleanupLocalServiceWorker() {
+          var host = window.location.hostname;
+          var isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+
+          if (!isLocalHost || !("serviceWorker" in navigator)) return;
+
+          navigator.serviceWorker
+            .getRegistrations()
+            .then(function (registrations) {
+              registrations.forEach(function (registration) {
+                registration.unregister();
+              });
+            })
+            .catch(function () {
+              /* Best-effort cleanup for stale local preview workers. */
+            });
+
+          if ("caches" in window) {
+            window.caches
+              .keys()
+              .then(function (keys) {
+                return Promise.all(
+                  keys.map(function (key) {
+                    return window.caches.delete(key);
+                  })
+                );
+              })
+              .catch(function () {
+                /* Cache deletion can be blocked in private browsing contexts. */
+              });
+          }
+        }
+
+        cleanupLocalServiceWorker();
+
+        var prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        function setupCrosshair() {
+          var horizontal = document.getElementById("ch-h");
+          var vertical = document.getElementById("ch-v");
+
+          if (!horizontal || !vertical || window.matchMedia("(pointer: coarse)").matches) return;
+
+          document.addEventListener("mousemove", function (event) {
+            horizontal.style.top = event.clientY + "px";
+            vertical.style.left = event.clientX + "px";
+          });
+        }
+
+        function setupReveal() {
+          var revealNodes = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+
+          if (!("IntersectionObserver" in window)) {
+            revealNodes.forEach(function (node) {
+              node.classList.add("active");
+            });
+            return;
+          }
+
+          var observer = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (!entry.isIntersecting) return;
+                entry.target.classList.add("active");
+                observer.unobserve(entry.target);
+              });
+            },
+            {
+              root: null,
+              rootMargin: "0px",
+              threshold: 0.15
+            }
+          );
+
+          revealNodes.forEach(function (node) {
+            observer.observe(node);
+          });
+        }
+
+        function setupAltitude() {
+          var altVal = document.getElementById("alt-val");
+          var header = document.querySelector(".global-nav");
+
+          function update() {
+            var maxScroll = Math.max(1, document.body.scrollHeight - window.innerHeight);
+            var progress = Math.min(1, Math.max(0, window.scrollY / maxScroll));
+            var currentAlt = Math.max(0, Math.floor(84000 * (1 - progress)));
+
+            if (altVal) {
+              altVal.textContent = currentAlt.toLocaleString();
+            }
+
+            if (!header) return;
+            if (window.scrollY > 80) {
+              header.style.opacity = "0";
+              header.style.pointerEvents = "none";
+              header.style.visibility = "hidden";
+            } else {
+              header.style.opacity = "1";
+              header.style.pointerEvents = "auto";
+              header.style.visibility = "visible";
+            }
+          }
+
+          window.addEventListener("scroll", update, { passive: true });
+          window.addEventListener("resize", update);
+          update();
+        }
+
+        function activateFallback() {
+          var container = document.getElementById("webgl-container");
+          if (container) {
+            container.classList.add("fallback-bg");
+          }
+        }
+
+        function initWebGL() {
+          var container = document.getElementById("webgl-container");
+          var THREE = window.THREE;
+          var scene;
+          var camera;
+          var renderer;
+          var vertexShader;
+          var fragmentShader;
+          var uniforms;
+          var plane;
+          var animationFrame = 0;
+
+          if (!container || !THREE) {
+            activateFallback();
+            return;
+          }
+
+          try {
+            scene = new THREE.Scene();
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            container.appendChild(renderer.domElement);
+          } catch (error) {
+            activateFallback();
+            return;
+          }
+
+          vertexShader = [
+            "varying vec2 vUv;",
+            "void main() {",
+            "  vUv = uv;",
+            "  gl_Position = vec4(position, 1.0);",
+            "}"
+          ].join("\n");
+
+          fragmentShader = [
+            "uniform float u_scroll;",
+            "uniform vec2 u_resolution;",
+            "varying vec2 vUv;",
+            "vec3 colorNavy = vec3(0.06, 0.09, 0.15);",
+            "vec3 colorIndigo = vec3(0.09, 0.10, 0.17);",
+            "vec3 colorPlum = vec3(0.14, 0.09, 0.13);",
+            "vec3 colorBase = vec3(0.03, 0.03, 0.045);",
+            "float random(vec2 st) {",
+            "  return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);",
+            "}",
+            "void main() {",
+            "  float globalY = vUv.y * 0.3 + (1.0 - u_scroll) * 0.7;",
+            "  vec3 finalColor;",
+            "  if (globalY > 0.6) {",
+            "    finalColor = mix(colorIndigo, colorNavy, smoothstep(0.6, 1.0, globalY));",
+            "  } else if (globalY > 0.2) {",
+            "    finalColor = mix(colorPlum, colorIndigo, smoothstep(0.2, 0.6, globalY));",
+            "  } else {",
+            "    finalColor = mix(colorBase, colorPlum, smoothstep(0.0, 0.2, globalY));",
+            "  }",
+            "  float noise = random(vUv * u_resolution) * 0.05;",
+            "  finalColor -= noise;",
+            "  finalColor *= 0.88;",
+            "  gl_FragColor = vec4(finalColor, 1.0);",
+            "}"
+          ].join("\n");
+
+          uniforms = {
+            u_scroll: { value: 0 },
+            u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+          };
+
+          plane = new THREE.Mesh(
+            new THREE.PlaneGeometry(2, 2),
+            new THREE.ShaderMaterial({
+              vertexShader: vertexShader,
+              fragmentShader: fragmentShader,
+              uniforms: uniforms,
+              depthWrite: false,
+              depthTest: false
+            })
+          );
+          scene.add(plane);
+
+          function scrollProgress() {
+            return Math.min(1, Math.max(0, window.scrollY / Math.max(1, document.body.scrollHeight - window.innerHeight)));
+          }
+
+          function render() {
+            var progress = scrollProgress();
+
+            uniforms.u_scroll.value = progress;
+
+            renderer.autoClear = true;
+            renderer.render(scene, camera);
+          }
+
+          function animate() {
+            render();
+            if (!prefersReducedMotion) {
+              animationFrame = window.requestAnimationFrame(animate);
+            }
+          }
+
+          window.addEventListener("scroll", render, { passive: true });
+          window.addEventListener("resize", function () {
+            var width = window.innerWidth;
+            var height = window.innerHeight;
+
+            renderer.setSize(width, height);
+            uniforms.u_resolution.value.set(width, height);
+            render();
+          });
+
+          animate();
+
+          window.addEventListener("pagehide", function () {
+            if (animationFrame) {
+              window.cancelAnimationFrame(animationFrame);
+            }
+          });
+        }
+
+        function initWebGLWhenReady(attempt) {
+          if (window.THREE || attempt >= 30) {
+            initWebGL();
+            return;
+          }
+
+          window.setTimeout(function () {
+            initWebGLWhenReady(attempt + 1);
+          }, 100);
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+          setupCrosshair();
+          setupReveal();
+          setupAltitude();
+          initWebGLWhenReady(0);
+        });
+      })();
+    </script>
+  </body>
+</html>
