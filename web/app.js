@@ -1,3 +1,14 @@
+import {
+  createPublicClient,
+  createWalletClient,
+  custom,
+  encodeFunctionData,
+  formatUnits as viemFormatUnits,
+  http,
+  parseAbi,
+  parseUnits as viemParseUnits
+} from "https://esm.sh/viem@2.45.2";
+
 (function () {
   "use strict";
 
@@ -224,21 +235,24 @@
   var PREFERRED_CHAIN_KEY = "enten.preferredChainId";
   var NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-  var SELECTORS = {
-    erc20BalanceOf: "0x70a08231",
-    erc20Approve: "0x095ea7b3",
-    erc20Allowance: "0xdd62ed3e",
-    erc20Decimals: "0x313ce567",
-    auctionBuy: "0x4bb30c8e",
-    auctionGetPrice: "0x98d5fdca",
-    auctionRemainingLot: "0x9882bb7e",
-    auctionLotSize: "0x7fee67a2",
-    auctionStartTime: "0x78e97925",
-    auctionEpochPeriod: "0xb5b7a184",
-    auctionEpochId: "0xaa9bbc0c",
-    vaultBackingBalances: "0xc36876e9",
-    multicallAggregate3: "0x82ad56cb"
-  };
+  var ERC20_ABI = parseAbi([
+    "function balanceOf(address owner) view returns (uint256)",
+    "function allowance(address owner, address spender) view returns (uint256)",
+    "function approve(address spender, uint256 amount) returns (bool)"
+  ]);
+
+  var AUCTION_ABI = parseAbi([
+    "function getPrice() view returns ((address token, uint256 amount)[])",
+    "function remainingLot() view returns (uint256)",
+    "function LOT_SIZE() view returns (uint256)",
+    "function startTime() view returns (uint256)",
+    "function epochPeriod() view returns (uint256)",
+    "function epochId() view returns (uint256)",
+    "function buy(uint256 epochId, uint256 deadline, uint256 mintAmount, (address token, uint256 amount)[] maxPayments)",
+    "function startNextAuction()"
+  ]);
+
+  var VAULT_ABI = parseAbi(["function backingBalances() view returns ((address token, uint256 amount)[])"]);
 
   var state = {
     account: "",
@@ -253,6 +267,12 @@
   var swapUiState = {
     reversed: false,
     quoteId: "ETH"
+  };
+  var auctionUiState = {
+    remainingLot: null,
+    prices: [],
+    mintDecimals: 18,
+    chainId: ""
   };
   var auctionCountdownTimer = null;
 
@@ -599,56 +619,8 @@
     return String(value || "").replace(/^0x/i, "");
   }
 
-  function with0x(value) {
-    return "0x" + strip0x(value);
-  }
-
   function isAddress(value) {
     return /^0x[0-9a-fA-F]{40}$/.test(String(value || ""));
-  }
-
-  function pad32(value) {
-    return strip0x(value).padStart(64, "0");
-  }
-
-  function encodeAddress(value) {
-    if (!isAddress(value)) throw new Error("Invalid address");
-    return pad32(strip0x(value).toLowerCase());
-  }
-
-  function encodeUint(value) {
-    var bigint = BigInt(value);
-    if (bigint < 0n) throw new Error("Negative uint");
-    return bigint.toString(16).padStart(64, "0");
-  }
-
-  function encodeBool(value) {
-    return encodeUint(value ? 1 : 0);
-  }
-
-  function encodeBytes(value) {
-    var hex = strip0x(value);
-    var paddedLength = Math.ceil(hex.length / 64) * 64;
-    return encodeUint(hex.length / 2) + hex.padEnd(paddedLength, "0");
-  }
-
-  function encodeAggregate3Calls(calls) {
-    var elementOffsets = "";
-    var elementTails = "";
-    var elementOffsetBase = calls.length * 32;
-
-    calls.forEach(function (call) {
-      elementOffsets += encodeUint(elementOffsetBase + elementTails.length / 2);
-      elementTails += encodeAddress(call.target) + encodeBool(call.allowFailure !== false) + encodeUint(96) + encodeBytes(call.callData || "0x");
-    });
-
-    return SELECTORS.multicallAggregate3 + encodeUint(32) + encodeUint(calls.length) + elementOffsets + elementTails;
-  }
-
-  function uintToHex(value) {
-    var bigint = BigInt(value);
-    if (bigint === 0n) return "0x0";
-    return "0x" + bigint.toString(16);
   }
 
   function parseUnits(value, decimals) {
@@ -658,22 +630,28 @@
     var fraction;
 
     if (!input || !/^\d*(\.\d*)?$/.test(input)) return 0n;
+    if (input === ".") return 0n;
 
     parts = input.split(".");
     whole = parts[0] || "0";
-    fraction = (parts[1] || "").slice(0, decimals).padEnd(decimals, "0");
+    fraction = parts[1] === undefined ? "" : parts[1].slice(0, decimals);
 
-    return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(fraction || "0");
+    return viemParseUnits(fraction ? whole + "." + fraction : whole, decimals);
   }
 
   function formatUnits(value, decimals, maxFractionDigits) {
-    var bigint = BigInt(value || 0);
-    var base = 10n ** BigInt(decimals);
-    var whole = bigint / base;
-    var fraction = (bigint % base).toString().padStart(decimals, "0");
+    var formatted = viemFormatUnits(BigInt(value || 0), decimals);
+    var parts = formatted.split(".");
+    var whole = parts[0];
+    var fraction = parts[1] || "";
     var trimmed = fraction.slice(0, maxFractionDigits || 4).replace(/0+$/, "");
 
     return trimmed ? whole.toString() + "." + trimmed : whole.toString();
+  }
+
+  function formatUnitsForInput(value, decimals) {
+    var formatted = viemFormatUnits(BigInt(value || 0), decimals);
+    return formatted.indexOf(".") === -1 ? formatted : formatted.replace(/0+$/, "").replace(/\.$/, "");
   }
 
   function formatUnitsCompact(value, decimals) {
@@ -730,126 +708,95 @@
     return "0." + trimmed;
   }
 
-  function decodeUint(result) {
-    var hex = strip0x(result).slice(0, 64);
-    if (!hex) return 0n;
-    return BigInt("0x" + hex);
-  }
-
-  function wordAt(result, index) {
-    return strip0x(result).slice(index * 64, index * 64 + 64);
-  }
-
-  function decodeAddressWord(word) {
-    var hex = String(word || "").slice(-40);
-    return isAddress("0x" + hex) ? "0x" + hex : "";
-  }
-
-  function decodeAddressUintArray(result) {
-    var words = Math.floor(strip0x(result).length / 64);
-    var offset;
-    var length;
-    var start;
-    var items = [];
-
-    if (words < 2) return items;
-
-    offset = Number(BigInt("0x" + wordAt(result, 0)) / 32n);
-    length = Number(BigInt("0x" + wordAt(result, offset)));
-    start = offset + 1;
-
-    for (var index = 0; index < length; index += 1) {
-      var address = decodeAddressWord(wordAt(result, start + index * 2));
-      var amountWord = wordAt(result, start + index * 2 + 1);
-
-      if (address && amountWord) {
-        items.push({
-          address: address,
-          amount: BigInt("0x" + amountWord)
-        });
-      }
-    }
-
-    return items;
-  }
-
-  function decodeBytesAt(result, absoluteOffsetBytes) {
-    var offsetWords = absoluteOffsetBytes / 32;
-    var length = Number(BigInt("0x" + wordAt(result, offsetWords)));
-    var dataStart = (offsetWords + 1) * 64;
-    return "0x" + strip0x(result).slice(dataStart, dataStart + length * 2);
-  }
-
-  function decodeAggregate3Result(result) {
-    var offset = Number(BigInt("0x" + wordAt(result, 0)) / 32n);
-    var length = Number(BigInt("0x" + wordAt(result, offset)));
-    var offsetsStart = offset + 1;
-    var arrayDataStartBytes = offsetsStart * 32;
-    var items = [];
-
-    for (var index = 0; index < length; index += 1) {
-      var elementOffsetBytes = Number(BigInt("0x" + wordAt(result, offsetsStart + index)));
-      var elementStartBytes = arrayDataStartBytes + elementOffsetBytes;
-      var elementStartWord = elementStartBytes / 32;
-      var success = BigInt("0x" + wordAt(result, elementStartWord)) === 1n;
-      var bytesOffsetBytes = Number(BigInt("0x" + wordAt(result, elementStartWord + 1)));
-      var returnData = decodeBytesAt(result, elementStartBytes + bytesOffsetBytes);
-
-      items.push({
-        success: success,
-        returnData: returnData
-      });
-    }
-
-    return items;
-  }
-
-  async function rpcRequest(chain, method, params) {
-    var rpcUrl = chain && chain.rpcUrls && chain.rpcUrls[0];
-    var response;
-    var payload;
-
-    if (!rpcUrl) throw new Error("No RPC URL configured");
-
-    response = await window.fetch(rpcUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: method,
-        params: params || []
-      })
-    });
-
-    if (!response.ok) throw new Error("RPC request failed");
-    payload = await response.json();
-    if (payload.error) {
-      var rpcError = new Error(payload.error.message || "RPC error");
-      rpcError.code = payload.error.code;
-      rpcError.data = payload.error.data;
-      throw rpcError;
-    }
-    return payload.result;
-  }
-
   function shouldUseWalletForRead(chain) {
     return state.provider && chain && state.chainId && state.chainId.toLowerCase() === chain.chainId.toLowerCase();
   }
 
-  function readRequest(chain, method, params) {
-    if (shouldUseWalletForRead(chain)) {
-      return request(method, params);
-    }
-    return rpcRequest(chain, method, params);
+  function viemChain(chain) {
+    var blockExplorer = chain && chain.blockExplorerUrls && chain.blockExplorerUrls[0];
+    var rpcUrls = chain && chain.rpcUrls && chain.rpcUrls.length ? chain.rpcUrls : [];
+
+    if (!chain) throw new Error("No chain configured");
+
+    return {
+      id: chain.chainIdDecimal,
+      name: chain.chainName,
+      nativeCurrency: chain.nativeCurrency,
+      rpcUrls: {
+        default: { http: rpcUrls },
+        public: { http: rpcUrls }
+      },
+      contracts: isAddress(chain.multicall3)
+        ? {
+            multicall3: {
+              address: chain.multicall3,
+              blockCreated: 0
+            }
+          }
+        : undefined,
+      blockExplorers: blockExplorer
+        ? {
+            default: {
+              name: chain.shortName + " Explorer",
+              url: blockExplorer
+            }
+          }
+        : undefined
+    };
   }
 
-  function ethCall(to, data, chain) {
+  function publicClientForChain(chain) {
     var targetChain = chain || currentChainConfig();
-    if (!targetChain) throw new Error("No chain configured for eth_call");
-    return readRequest(targetChain, "eth_call", [{ to: to, data: data }, "latest"]);
+    var transport;
+
+    if (!targetChain) throw new Error("No chain configured for read");
+    if (shouldUseWalletForRead(targetChain)) {
+      transport = custom(state.provider);
+    } else {
+      transport = http(targetChain.rpcUrls && targetChain.rpcUrls[0]);
+    }
+
+    return createPublicClient({
+      chain: viemChain(targetChain),
+      transport: transport
+    });
+  }
+
+  function walletClientForChain(chain) {
+    var targetChain = chain || currentChainConfig();
+
+    if (!targetChain) throw new Error("No chain configured for wallet action");
+    if (!state.provider) throw new Error("No wallet provider");
+
+    return createWalletClient({
+      account: state.account,
+      chain: viemChain(targetChain),
+      transport: custom(state.provider)
+    });
+  }
+
+  function hexQuantityToBigInt(value) {
+    if (value === undefined || value === null || value === "") return 0n;
+    if (typeof value === "bigint") return value;
+    if (typeof value === "number") return BigInt(value);
+    if (/^0x[0-9a-fA-F]+$/.test(String(value))) return BigInt(value);
+    if (/^\d+$/.test(String(value))) return BigInt(value);
+    return 0n;
+  }
+
+  function normalizeAssetItems(items) {
+    return (items || [])
+      .map(function (item) {
+        var address = item && (item.address || item.token || item[0]);
+        var amount = item && (item.amount !== undefined ? item.amount : item[1]);
+
+        if (!isAddress(address)) return null;
+        return {
+          address: address,
+          amount: BigInt(amount || 0)
+        };
+      })
+      .filter(Boolean);
   }
 
   function hexToUtf8(hex) {
@@ -910,41 +857,46 @@
   }
 
   async function simulateTransaction(tx, chain) {
-    var targetChain = chain || currentChainConfig();
-    var call = {
-      from: tx.from,
+    var client = publicClientForChain(chain || currentChainConfig());
+
+    await client.call({
+      account: tx.from,
       to: tx.to,
       data: tx.data || "0x",
-      value: normalizeHexQuantity(tx.value)
-    };
-
-    if (!targetChain) throw new Error("No chain configured for simulation");
-    await readRequest(targetChain, "eth_call", [call, "latest"]);
+      value: hexQuantityToBigInt(tx.value)
+    });
   }
 
-  async function multicallAggregate3(chain, calls) {
-    if (!chain || !isAddress(chain.multicall3)) throw new Error("Multicall3 is not configured");
-    return decodeAggregate3Result(await ethCall(chain.multicall3, encodeAggregate3Calls(calls), chain));
+  function sendTransaction(tx, chain) {
+    return walletClientForChain(chain || currentChainConfig()).sendTransaction({
+      account: tx.from || state.account,
+      to: tx.to,
+      data: tx.data || "0x",
+      value: hexQuantityToBigInt(tx.value)
+    });
   }
 
-  function sendTransaction(tx) {
-    return request("eth_sendTransaction", [tx]);
-  }
-
-  async function waitForTransaction(txHash) {
-    var attempts = 0;
-    var receipt = null;
-
-    while (!receipt && attempts < 60) {
-      receipt = await request("eth_getTransactionReceipt", [txHash]);
-      if (receipt) return receipt;
-      attempts += 1;
-      await new Promise(function (resolve) {
-        window.setTimeout(resolve, 2000);
+  async function waitForTransaction(txHash, chain) {
+    try {
+      var receipt = await publicClientForChain(chain || currentChainConfig()).waitForTransactionReceipt({
+        hash: txHash,
+        pollingInterval: 2000,
+        timeout: 120000
       });
+      return Object.assign({}, receipt, {
+        status: receipt.status === "reverted" ? "0x0" : "0x1"
+      });
+    } catch (error) {
+      return null;
     }
+  }
 
-    return null;
+  function refreshAuctionDataSoon(delayMs) {
+    window.setTimeout(loadAuctionData, delayMs || 1500);
+  }
+
+  function refreshSwapBalancesSoon(delayMs) {
+    window.setTimeout(loadSwapBalances, delayMs || 1500);
   }
 
   function setText(selector, value) {
@@ -1200,14 +1152,18 @@
   }
 
   async function tokenBalance(tokenAddress, account, chain) {
-    var data = SELECTORS.erc20BalanceOf + encodeAddress(account);
-    return decodeUint(await ethCall(tokenAddress, data, chain));
+    return publicClientForChain(chain).readContract({
+      address: tokenAddress,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [account]
+    });
   }
 
   async function walletTokenBalance(token, account, chain) {
     if (!token) return null;
     if (token.native) {
-      return decodeUint(await readRequest(chain, "eth_getBalance", [account, "latest"]));
+      return publicClientForChain(chain).getBalance({ address: account });
     }
     if (isAddress(token.address)) {
       return tokenBalance(token.address, account, chain);
@@ -1254,15 +1210,6 @@
 
   function canRouteToken(token) {
     return token && (token.native || isAddress(token.address));
-  }
-
-  function normalizeHexQuantity(value) {
-    if (value === undefined || value === null || value === "") return "0x0";
-    if (typeof value === "bigint") return uintToHex(value);
-    if (typeof value === "number") return uintToHex(BigInt(value));
-    if (/^0x[0-9a-fA-F]+$/.test(String(value))) return String(value);
-    if (/^\d+$/.test(String(value))) return uintToHex(BigInt(value));
-    return "0x0";
   }
 
   function buildRouteRequest(chain, pair, amountIn) {
@@ -1347,7 +1294,7 @@
         from: state.account,
         to: approval.to,
         data: approval.data || "0x",
-        value: normalizeHexQuantity(approval.value)
+        value: approval.value === undefined ? 0n : approval.value
       };
 
       setStatus("[data-page-status]", "Simulating approval " + (index + 1) + " of " + approvals.length + "...", "warn");
@@ -1384,7 +1331,7 @@
       from: state.account,
       to: to,
       data: data,
-      value: normalizeHexQuantity(value)
+      value: value
     };
   }
 
@@ -1449,7 +1396,20 @@
     setStatus("[data-page-status]", "Submitting Universal Router swap...", "warn");
     txHash = await sendTransaction(routeTx);
 
-    setStatus("[data-page-status]", "Swap submitted: " + txHash.slice(0, 10) + "...", "ok");
+    setStatus("[data-page-status]", "Swap submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
+    refreshSwapBalancesSoon();
+
+    var receipt = await waitForTransaction(txHash, chain);
+    if (!receipt) {
+      setStatus("[data-page-status]", "Swap submitted and still pending. Balances will update on the next wallet refresh.", "warn");
+      return;
+    }
+    if (receipt.status === "0x0") {
+      setStatus("[data-page-status]", "Swap reverted.", "warn");
+      return;
+    }
+
+    setStatus("[data-page-status]", "Swap confirmed: " + txHash.slice(0, 10) + "...", "ok");
     loadSwapBalances();
   }
 
@@ -1458,6 +1418,23 @@
     var tokens = [];
 
     if (!chain || !isAddress(address)) return null;
+    if (isNativeAssetAddress(address)) {
+      return (
+        chain.tokens &&
+        Array.isArray(chain.tokens.quotes) &&
+        chain.tokens.quotes.find(function (token) {
+          return token && token.native;
+        })
+      ) || {
+        id: chain.nativeCurrency.symbol,
+        address: NATIVE_TOKEN_ADDRESS,
+        symbol: chain.nativeCurrency.symbol,
+        name: chain.nativeCurrency.name,
+        decimals: chain.nativeCurrency.decimals,
+        native: true
+      };
+    }
+
     if (chain.tokens && chain.tokens.enten) {
       tokens.push(chain.tokens.enten);
     }
@@ -1505,6 +1482,69 @@
     setText(unitSelector, unit);
   }
 
+  function paymentEstimateText(chain, amount) {
+    var prices = auctionUiState.prices || [];
+    var mintDecimals = auctionUiState.mintDecimals;
+    var payments;
+
+    if (!amount || amount <= 0n) return "Estimated spend: --";
+    if (!prices.length) return "Estimated spend unavailable";
+
+    payments = paymentsForMintAmount(prices, amount, mintDecimals).filter(function (payment) {
+      return payment.amount > 0n;
+    });
+
+    if (!payments.length) return "Estimated spend: --";
+
+    return (
+      "Estimated spend: " +
+      payments
+        .map(function (payment) {
+          var display = assetDisplay(chain, payment, 6);
+          return display.value + " " + display.unit;
+        })
+        .join(" + ")
+    );
+  }
+
+  function updateAuctionPaymentPreview() {
+    var chain = activeAuctionChainConfig();
+    var input = $("#bidAmount");
+    var amount = 0n;
+    var decimals = auctionUiState.mintDecimals;
+    var estimate = "Estimated spend: --";
+
+    if (input && input.value) {
+      amount = parseUnits(input.value, decimals);
+    }
+
+    if (auctionUiState.remainingLot !== null && amount > auctionUiState.remainingLot) {
+      estimate = "Exceeds available lot";
+    } else if (chain) {
+      estimate = paymentEstimateText(chain, amount);
+    }
+
+    setText("[data-auction-payment-estimate]", estimate);
+  }
+
+  function updateAuctionMaxControl() {
+    var hasRemaining = auctionUiState.remainingLot !== null && auctionUiState.remainingLot > 0n;
+
+    $all("[data-auction-max-amount], [data-auction-buy-max]").forEach(function (button) {
+      button.disabled = !hasRemaining;
+    });
+  }
+
+  function setAuctionAmountToMax() {
+    var input = $("#bidAmount");
+
+    if (!input || auctionUiState.remainingLot === null || auctionUiState.remainingLot <= 0n) return false;
+
+    input.value = formatUnitsForInput(auctionUiState.remainingLot, auctionUiState.mintDecimals);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
+
   function formatDuration(seconds) {
     var total = Math.max(0, Number(seconds || 0));
     var hours = Math.floor(total / 3600);
@@ -1518,13 +1558,21 @@
       .join(":");
   }
 
-  function startAuctionCountdown(endTime) {
+  function setStartNextAuctionVisible(visible) {
+    $all("[data-auction-start-next]").forEach(function (button) {
+      button.hidden = !visible;
+    });
+  }
+
+  function startAuctionCountdown(endTime, soldOut) {
     function tick() {
       var now = BigInt(Math.floor(Date.now() / 1000));
       var remaining = endTime > now ? endTime - now : 0n;
+      var canStartNext = Boolean(soldOut) || remaining === 0n;
 
       setText("[data-auction-timeLeft]", formatDuration(remaining));
       setText("[data-auction-timeLeft-unit]", remaining > 0n ? "remaining" : "ended");
+      setStartNextAuctionVisible(canStartNext);
 
       if (remaining === 0n && auctionCountdownTimer) {
         window.clearInterval(auctionCountdownTimer);
@@ -1541,7 +1589,13 @@
   }
 
   async function auctionPrice(chain) {
-    return decodeAddressUintArray(await ethCall(chain.auction.address, SELECTORS.auctionGetPrice, chain));
+    return normalizeAssetItems(
+      await publicClientForChain(chain).readContract({
+        address: chain.auction.address,
+        abi: AUCTION_ABI,
+        functionName: "getPrice"
+      })
+    );
   }
 
   function paymentsForMintAmount(prices, mintAmount, mintDecimals) {
@@ -1567,15 +1621,23 @@
   }
 
   async function tokenAllowance(tokenAddress, owner, spender, chain) {
-    var data = SELECTORS.erc20Allowance + encodeAddress(owner) + encodeAddress(spender);
-    return decodeUint(await ethCall(tokenAddress, data, chain));
+    return publicClientForChain(chain).readContract({
+      address: tokenAddress,
+      abi: ERC20_ABI,
+      functionName: "allowance",
+      args: [owner, spender]
+    });
   }
 
   function buildApproveTokenTransaction(tokenAddress, spender, amount) {
     return {
       from: state.account,
       to: tokenAddress,
-      data: SELECTORS.erc20Approve + encodeAddress(spender) + encodeUint(amount),
+      data: encodeFunctionData({
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [spender, amount]
+      }),
       value: "0x0"
     };
   }
@@ -1637,19 +1699,19 @@
     return true;
   }
 
-  function encodeReceiptArray(receipts) {
-    return (
-      encodeUint(receipts.length) +
-      receipts
-        .map(function (receipt) {
-          return encodeAddress(receipt.address) + encodeUint(receipt.amount);
-        })
-        .join("")
-    );
-  }
-
   function buildAuctionBuyData(epochId, deadline, mintAmount, maxPayments) {
-    return SELECTORS.auctionBuy + encodeUint(epochId) + encodeUint(deadline) + encodeUint(mintAmount) + encodeUint(128) + encodeReceiptArray(maxPayments);
+    return encodeFunctionData({
+      abi: AUCTION_ABI,
+      functionName: "buy",
+      args: [
+        epochId,
+        deadline,
+        mintAmount,
+        maxPayments.map(function (payment) {
+          return [payment.address, payment.amount];
+        })
+      ]
+    });
   }
 
   async function submitAuctionBuy() {
@@ -1661,6 +1723,7 @@
     var epochId;
     var prices;
     var maxPayments;
+    var receipt;
     var txHash;
 
     if (!chain || !chain.auction || !isAddress(chain.auction.address)) {
@@ -1669,14 +1732,28 @@
     }
 
     amount = parseUnits(input ? input.value : "", chain.auction.mintDecimals === undefined ? 18 : chain.auction.mintDecimals);
+    updateAuctionPaymentPreview();
+
     if (amount <= 0n) {
       setStatus("[data-page-status]", "Enter a mint amount.", "warn");
       return;
     }
 
+    if (auctionUiState.remainingLot !== null && amount > auctionUiState.remainingLot) {
+      setStatus("[data-page-status]", "Amount exceeds the remaining lot. Use Max or enter a smaller amount.", "warn");
+      return;
+    }
+
     setStatus("[data-page-status]", "Reading auction epoch and price...", "warn");
     try {
-      var auctionReads = await Promise.all([ethCall(chain.auction.address, SELECTORS.auctionEpochId, chain).then(decodeUint), auctionPrice(chain)]);
+      var auctionReads = await Promise.all([
+        publicClientForChain(chain).readContract({
+          address: chain.auction.address,
+          abi: AUCTION_ABI,
+          functionName: "epochId"
+        }),
+        auctionPrice(chain)
+      ]);
       epochId = auctionReads[0];
       prices = auctionReads[1];
     } catch (error) {
@@ -1712,42 +1789,123 @@
     }
 
     setStatus("[data-page-status]", "Submitting auction buy transaction...", "warn");
-    txHash = await sendTransaction(auctionTx);
+    txHash = await sendTransaction(auctionTx, chain);
 
-    setStatus("[data-page-status]", "Buy submitted: " + txHash.slice(0, 10) + "...", "ok");
+    setStatus("[data-page-status]", "Buy submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
+    refreshAuctionDataSoon();
+
+    receipt = await waitForTransaction(txHash, chain);
+    if (!receipt) {
+      setStatus("[data-page-status]", "Buy submitted and still pending. Auction data will refresh again after confirmation.", "warn");
+      return;
+    }
+    if (receipt.status === "0x0") {
+      setStatus("[data-page-status]", "Auction buy reverted.", "warn");
+      loadAuctionData();
+      return;
+    }
+
+    setStatus("[data-page-status]", "Buy confirmed: " + txHash.slice(0, 10) + "...", "ok");
+    loadAuctionData();
+  }
+
+  async function submitStartNextAuction() {
+    var chain = currentChainConfig();
+    var receipt;
+    var startTx;
+    var txHash;
+
+    if (!chain || !chain.auction || !isAddress(chain.auction.address)) {
+      setStatus("[data-page-status]", "Configure the auction contract address before starting the next auction.", "warn");
+      return;
+    }
+
+    startTx = {
+      from: state.account,
+      to: chain.auction.address,
+      data: encodeFunctionData({
+        abi: AUCTION_ABI,
+        functionName: "startNextAuction"
+      }),
+      value: "0x0"
+    };
+
+    setStatus("[data-page-status]", "Simulating next auction start...", "warn");
+    try {
+      await simulateTransaction(startTx, chain);
+    } catch (error) {
+      setStatus("[data-page-status]", "Start preflight failed: " + simulationFailureMessage(error), "warn");
+      return;
+    }
+
+    setStatus("[data-page-status]", "Submitting next auction start...", "warn");
+    txHash = await sendTransaction(startTx, chain);
+    setStatus("[data-page-status]", "Start submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
+    refreshAuctionDataSoon();
+
+    receipt = await waitForTransaction(txHash, chain);
+    if (!receipt) {
+      setStatus("[data-page-status]", "Start submitted and still pending. Auction data will refresh again after confirmation.", "warn");
+      return;
+    }
+    if (receipt.status === "0x0") {
+      setStatus("[data-page-status]", "Start next auction reverted.", "warn");
+      loadAuctionData();
+      return;
+    }
+
+    setStatus("[data-page-status]", "Next auction started: " + txHash.slice(0, 10) + "...", "ok");
+    loadAuctionData();
   }
 
   async function loadAuctionData() {
     var chain = activeAuctionChainConfig();
     var auction = chain ? chain.auction : null;
+    var client;
     var calls;
     var results = {};
     var endTime;
+    var soldOut = false;
 
-    if (!chain || !auction || !isAddress(auction.address)) return;
+    if (!chain || !auction || !isAddress(auction.address)) {
+      auctionUiState.remainingLot = null;
+      auctionUiState.prices = [];
+      auctionUiState.chainId = "";
+      setStartNextAuctionVisible(false);
+      updateAuctionMaxControl();
+      updateAuctionPaymentPreview();
+      return;
+    }
 
     calls = [
-      { key: "price", target: auction.address, callData: SELECTORS.auctionGetPrice, decoder: decodeAddressUintArray },
-      { key: "epochId", target: auction.address, callData: SELECTORS.auctionEpochId, decoder: decodeUint },
-      { key: "remaining", target: auction.address, callData: SELECTORS.auctionRemainingLot, decoder: decodeUint },
-      { key: "lotSize", target: auction.address, callData: SELECTORS.auctionLotSize, decoder: decodeUint },
-      { key: "start", target: auction.address, callData: SELECTORS.auctionStartTime, decoder: decodeUint },
-      { key: "period", target: auction.address, callData: SELECTORS.auctionEpochPeriod, decoder: decodeUint }
+      { key: "price", address: auction.address, abi: AUCTION_ABI, functionName: "getPrice", normalize: normalizeAssetItems },
+      { key: "epochId", address: auction.address, abi: AUCTION_ABI, functionName: "epochId" },
+      { key: "remaining", address: auction.address, abi: AUCTION_ABI, functionName: "remainingLot" },
+      { key: "lotSize", address: auction.address, abi: AUCTION_ABI, functionName: "LOT_SIZE" },
+      { key: "start", address: auction.address, abi: AUCTION_ABI, functionName: "startTime" },
+      { key: "period", address: auction.address, abi: AUCTION_ABI, functionName: "epochPeriod" }
     ];
 
     if (isAddress(auction.vaultAddress)) {
-      calls.push({ key: "backing", target: auction.vaultAddress, callData: SELECTORS.vaultBackingBalances, decoder: decodeAddressUintArray });
+      calls.push({ key: "backing", address: auction.vaultAddress, abi: VAULT_ABI, functionName: "backingBalances", normalize: normalizeAssetItems });
     }
 
+    client = publicClientForChain(chain);
+
     try {
-      var multicallResults = await multicallAggregate3(chain, calls);
+      var multicallResults = await client.multicall({
+        allowFailure: true,
+        contracts: calls.map(function (call) {
+          return {
+            address: call.address,
+            abi: call.abi,
+            functionName: call.functionName
+          };
+        })
+      });
       multicallResults.forEach(function (result, index) {
-        if (result && result.success) {
-          try {
-            results[calls[index].key] = calls[index].decoder(result.returnData);
-          } catch (error) {
-            results[calls[index].key] = null;
-          }
+        if (result && result.status === "success") {
+          results[calls[index].key] = calls[index].normalize ? calls[index].normalize(result.result) : result.result;
         } else {
           results[calls[index].key] = null;
         }
@@ -1756,7 +1914,12 @@
       await Promise.all(
         calls.map(async function (call) {
           try {
-            results[call.key] = call.decoder(await ethCall(call.target, call.callData, chain));
+            var value = await client.readContract({
+              address: call.address,
+              abi: call.abi,
+              functionName: call.functionName
+            });
+            results[call.key] = call.normalize ? call.normalize(value) : value;
           } catch (innerError) {
             results[call.key] = null;
           }
@@ -1764,11 +1927,19 @@
       );
     }
 
+    auctionUiState.prices = results.price || [];
+    auctionUiState.mintDecimals = auction.mintDecimals === undefined ? 18 : auction.mintDecimals;
+    auctionUiState.chainId = chain.chainId;
+
     setAssetMetric("[data-auction-currentPrice]", "[data-auction-currentPrice-unit]", chain, results.price, "--", "");
 
     if (results.remaining !== null && results.remaining !== undefined) {
+      auctionUiState.remainingLot = results.remaining;
+      soldOut = results.remaining <= 0n;
       setText("[data-auction-amountLeft]", formatUnitsCompact(results.remaining, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
       setText("[data-auction-amountLeft-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
+    } else {
+      auctionUiState.remainingLot = null;
     }
 
     if (results.lotSize !== null && results.lotSize !== undefined) {
@@ -1778,12 +1949,17 @@
 
     if (results.start !== null && results.start !== undefined && results.period !== null && results.period !== undefined) {
       endTime = results.start + results.period;
-      startAuctionCountdown(endTime);
+      startAuctionCountdown(endTime, soldOut);
+    } else {
+      setStartNextAuctionVisible(soldOut);
     }
 
     if (results.backing) {
       setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, results.backing, "--", "");
     }
+
+    updateAuctionMaxControl();
+    updateAuctionPaymentPreview();
   }
 
   function updateNav() {
@@ -2015,10 +2191,46 @@
 
   function bindAuctionPage() {
     var form = $("[data-auction-form]");
+    var amountInput = $("#bidAmount");
+    var maxButton = $("[data-auction-max-amount]");
+    var buyMaxButton = $("[data-auction-buy-max]");
+    var startNextButton = $("[data-auction-start-next]");
     if (!form) return;
 
     updateContractLabels();
     loadAuctionData();
+
+    if (amountInput) {
+      amountInput.addEventListener("input", updateAuctionPaymentPreview);
+    }
+
+    if (maxButton) {
+      maxButton.addEventListener("click", function () {
+        if (!setAuctionAmountToMax()) return;
+        if (amountInput) amountInput.focus();
+      });
+    }
+
+    if (buyMaxButton) {
+      buyMaxButton.addEventListener("click", async function () {
+        if (!setAuctionAmountToMax()) {
+          setStatus("[data-page-status]", "No remaining lot is available to acquire.", "warn");
+          return;
+        }
+
+        if (!state.account && !(await connectWallet())) return;
+        if (!(await ensureSupportedNetwork("buying the remaining lot"))) return;
+
+        buyMaxButton.disabled = true;
+        try {
+          await submitAuctionBuy();
+        } catch (error) {
+          setStatus("[data-page-status]", "Max auction purchase failed or was rejected.", "warn");
+        } finally {
+          updateAuctionMaxControl();
+        }
+      });
+    }
 
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
@@ -2032,6 +2244,22 @@
         setStatus("[data-page-status]", "Auction transaction failed or was rejected.", "warn");
       }
     });
+
+    if (startNextButton) {
+      startNextButton.addEventListener("click", async function () {
+        if (!state.account && !(await connectWallet())) return;
+        if (!(await ensureSupportedNetwork("starting the next auction"))) return;
+
+        startNextButton.disabled = true;
+        try {
+          await submitStartNextAuction();
+        } catch (error) {
+          setStatus("[data-page-status]", "Next auction start failed or was rejected.", "warn");
+        } finally {
+          startNextButton.disabled = false;
+        }
+      });
+    }
   }
 
   function bindSwapPage() {

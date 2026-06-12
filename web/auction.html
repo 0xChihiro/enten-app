@@ -702,7 +702,7 @@
       .amount-input {
         width: 100%;
         min-height: 50px;
-        padding: 12px 72px 12px 16px;
+        padding: 12px 118px 12px 16px;
         border: 1px solid var(--c-cloud-faint);
         background: transparent;
         color: var(--c-cloud);
@@ -714,6 +714,36 @@
 
       .amount-input:focus {
         border-color: var(--c-gold);
+      }
+
+      .amount-max {
+        position: absolute;
+        top: 50%;
+        right: 66px;
+        min-height: 26px;
+        padding: 0 9px;
+        border: 1px solid rgba(239, 161, 67, 0.45);
+        color: var(--c-gold);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        transform: translateY(-50%);
+        transition:
+          background-color 0.25s ease,
+          color 0.25s ease,
+          border-color 0.25s ease;
+      }
+
+      .amount-max:hover {
+        border-color: var(--c-gold);
+        background: var(--c-gold);
+        color: var(--c-base);
+      }
+
+      .amount-max:disabled {
+        border-color: var(--c-cloud-hairline);
+        color: rgba(244, 244, 242, 0.24);
       }
 
       .amount-unit {
@@ -767,7 +797,18 @@
         margin-bottom: 16px;
       }
 
-      .acquire-button {
+      .auction-actions {
+        display: grid;
+        gap: 12px;
+      }
+
+      .auction-actions [hidden] {
+        display: none;
+      }
+
+      .acquire-button,
+      .buy-max-button,
+      .start-next-button {
         display: flex;
         width: 100%;
         min-height: 64px;
@@ -787,19 +828,37 @@
           color 0.3s ease;
       }
 
-      .acquire-button:hover {
+      .buy-max-button,
+      .start-next-button {
+        min-height: 52px;
+        border-color: rgba(239, 161, 67, 0.45);
+        color: var(--c-gold);
+      }
+
+      .buy-max-button {
+        border-color: rgba(76, 178, 168, 0.45);
+        color: var(--c-teal);
+      }
+
+      .acquire-button:hover,
+      .buy-max-button:hover,
+      .start-next-button:hover {
         border-color: var(--c-cloud);
         background: var(--c-cloud);
         color: var(--c-base);
       }
 
-      .acquire-button svg {
+      .acquire-button svg,
+      .buy-max-button svg,
+      .start-next-button svg {
         width: 16px;
         height: 16px;
         transition: transform 0.3s ease;
       }
 
-      .acquire-button:hover svg {
+      .acquire-button:hover svg,
+      .buy-max-button:hover svg,
+      .start-next-button:hover svg {
         transform: translateX(4px);
       }
 
@@ -946,7 +1005,7 @@
         <ul class="nav-links">
           <li><a href="./index.html#developers" data-nav>Developers</a></li>
           <li><a href="./index.html#system" data-nav>System</a></li>
-          <li><a href="./index.html#docs" data-nav>Documentation</a></li>
+          <li><a href="./docs.html" data-nav>Documentation</a></li>
           <li><a href="./auction.html" data-nav>Auctions</a></li>
           <li><a href="./swap.html" data-nav>Portal</a></li>
         </ul>
@@ -1092,15 +1151,16 @@
                       type="number"
                       inputmode="decimal"
                       placeholder="0.00"
-                      step="0.01"
+                      step="any"
                       autocomplete="off"
                       aria-label="ENTEN amount to acquire"
                     >
+                    <button class="amount-max" type="button" data-auction-max-amount disabled>Max</button>
                     <span class="amount-unit">ENTEN</span>
                   </div>
                   <div class="amount-meta">
                     <span>Amount to acquire</span>
-                    <span>Settlement asset calculated at execution</span>
+                    <span data-auction-payment-estimate>Estimated spend: --</span>
                   </div>
                   <p class="notice" data-page-status>Loading auction data...</p>
                   <p class="wallet-debug" data-wallet-debug>Checking wallet provider...</p>
@@ -1111,12 +1171,26 @@
                   <span>Updates from contract timing</span>
                 </div>
 
-                <button class="acquire-button" type="submit">
-                  Acquire at Current Price
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-                  </svg>
-                </button>
+                <div class="auction-actions">
+                  <button class="acquire-button" type="submit">
+                    Acquire at Current Price
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+                    </svg>
+                  </button>
+                  <button class="buy-max-button" type="button" data-auction-buy-max disabled>
+                    Acquire Max
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 12h16m0 0l-5-5m5 5l-5 5"></path>
+                    </svg>
+                  </button>
+                  <button class="start-next-button" type="button" data-auction-start-next hidden>
+                    Start Next Auction
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 5v14m7-7H5"></path>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1126,7 +1200,7 @@
       <footer class="auction-footer reveal">
         <div class="footer-stats">
           <div>Reads: Price / Lot / Backing</div>
-          <div>Writes: Approve / Buy</div>
+          <div>Writes: Approve / Buy / Start</div>
           <div>Network: Wallet Selected</div>
         </div>
         <div>(C) 2026 Enten Protocol</div>
@@ -1185,6 +1259,6 @@
         updateNavFade();
       })();
     </script>
-    <script src="./app.js"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>
