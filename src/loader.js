@@ -1,5 +1,6 @@
 var pageLoaders = {
   auction: function () { return import("./app-auction.js"); },
+  borrow: function () { return import("./app-borrow.js"); },
   launch: function () { return import("./app-launch.js"); },
   presale: function () { return import("./app-presale.js"); },
   swap: function () { return import("./app-swap.js"); },
@@ -14,8 +15,10 @@ var page = document.querySelector("[data-presale-page]")
       ? "auction"
       : document.querySelector("[data-swap-page]")
         ? "swap"
-        : document.querySelector("[data-launch-page]")
-          ? "launch"
-          : "";
+        : document.querySelector("[data-borrow-page]")
+          ? "borrow"
+          : document.querySelector("[data-launch-page]")
+            ? "launch"
+            : "";
 
 if (pageLoaders[page]) pageLoaders[page]();

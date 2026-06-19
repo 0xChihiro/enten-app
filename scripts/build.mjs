@@ -7,7 +7,7 @@ await rm("web/assets", { recursive: true, force: true });
 await rm("web/fonts", { recursive: true, force: true });
 await mkdir("web/fonts", { recursive: true });
 
-const pageKinds = ["auction", "launch", "presale", "swap", "wallet"];
+const pageKinds = ["auction", "borrow", "launch", "presale", "swap", "wallet"];
 await Promise.all([
   "web/app.js",
   "web/viem-runtime.js",

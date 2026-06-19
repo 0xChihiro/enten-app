@@ -23,6 +23,7 @@ if (!buildManifest.assets?.includes("/app.js")) {
 
 for (const requiredBundle of [
   "/app-auction.js",
+  "/app-borrow.js",
   "/app-launch.js",
   "/app-presale.js",
   "/app-swap.js",
@@ -69,6 +70,7 @@ for (const page of pages) {
 
 for (const [page, marker] of Object.entries({
   "auction.html": "data-auction-page",
+  "borrow.html": "data-borrow-page",
   "launch.html": "data-launch-page",
   "presale.html": "data-presale-page",
   "swap.html": "data-swap-page",

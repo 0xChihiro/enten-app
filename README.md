@@ -12,6 +12,7 @@ onchain site/resource contract.
 - `web/presale.html`
 - `web/launch.html`
 - `web/auction.html`
+- `web/borrow.html`
 - `web/swap.html`
 
 Shared styling and browser-wallet behavior live in:
@@ -50,7 +51,7 @@ python3 -m http.server 4173 --bind 127.0.0.1 -d web
 
 Then open `http://127.0.0.1:4173/presale.html`,
 `http://127.0.0.1:4173/launch.html`, `http://127.0.0.1:4173/auction.html`,
-or `http://127.0.0.1:4173/swap.html`.
+`http://127.0.0.1:4173/borrow.html`, or `http://127.0.0.1:4173/swap.html`.
 
 ## Install as a Progressive Web App
 
@@ -69,6 +70,9 @@ from the rest of the Enten transaction UI.
 
 Contract addresses and ABIs are intentionally empty in `web/app.js` until the
 auction and swap contracts are finalized in the protocol repo.
+
+The borrow page is currently a preview surface. It does not submit a transaction
+until the deployed borrow-market address and ABI are added to `src/app.js`.
 
 ## Swap Routing
 
@@ -120,4 +124,3 @@ pulls payment assets with `transferFrom`.
 Do not hardcode a Uniswap API key into the static site. Use `routeApiUrl` in
 `web/app.js`, or set `window.ENTEN_ROUTE_API`, to point at a small proxy that
 calls Uniswap's quote/swap API and returns wallet-ready calldata.
-

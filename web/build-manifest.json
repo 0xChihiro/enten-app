@@ -1,6 +1,7 @@
 {
   "assets": [
     "/app-auction.js",
+    "/app-borrow.js",
     "/app-launch.js",
     "/app-presale.js",
     "/app-swap.js",
@@ -22,6 +23,7 @@
   ],
   "precache": [
     "/app-auction.js",
+    "/app-borrow.js",
     "/app-launch.js",
     "/app-presale.js",
     "/app-swap.js",
