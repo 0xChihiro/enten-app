@@ -1,3 +1,6 @@
 name = "enten-app"
 compatibility_date = "2026-06-11"
-pages_build_output_dir = "./web"
+
+[assets]
+directory = "./web"
+not_found_handling = "single-page-application"
