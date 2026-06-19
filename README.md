@@ -121,12 +121,3 @@ Do not hardcode a Uniswap API key into the static site. Use `routeApiUrl` in
 `web/app.js`, or set `window.ENTEN_ROUTE_API`, to point at a small proxy that
 calls Uniswap's quote/swap API and returns wallet-ready calldata.
 
-## Foundry
-
-```shell
-forge build
-```
-
-```shell
-forge test
-```
