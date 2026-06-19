@@ -3,7 +3,7 @@
   "name": "Enten",
   "short_name": "Enten",
   "description": "A MegaETH wallet and interface for the Enten protocol.",
-  "start_url": "/index.html?source=pwa",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone"],
@@ -28,12 +28,12 @@
   "shortcuts": [
     {
       "name": "Swap",
-      "url": "/swap.html?source=pwa",
+      "url": "/swap?source=pwa",
       "icons": [{ "src": "/icons/enten-192.png", "sizes": "192x192" }]
     },
     {
       "name": "Auction",
-      "url": "/auction.html?source=pwa",
+      "url": "/auction?source=pwa",
       "icons": [{ "src": "/icons/enten-192.png", "sizes": "192x192" }]
     }
   ]

@@ -6,7 +6,7 @@
     "build": "node scripts/build.mjs",
     "check": "npm run build && node scripts/verify-pwa.mjs",
     "dev": "npm run build && wrangler pages dev web",
-    "deploy": "npm run build && wrangler pages deploy web --project-name enten-app"
+    "deploy": "npm run build && wrangler pages deploy web --project-name enten-app --branch main"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.2.8",

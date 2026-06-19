@@ -92,3 +92,5 @@ const assets = outputFiles
 const precache = assets.filter((asset) => asset !== "/moss-runtime.js");
 
 await writeFile("web/build-manifest.json", `${JSON.stringify({ assets, precache }, null, 2)}\n`);
+
+await writeFile("web/build.txt", `commit=${process.env.CF_PAGES_COMMIT_SHA || "local"}\ntime=${new Date().toISOString()}\n`);
