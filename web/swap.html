@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Enten | Swap // Atomic Exchange</title>
+    <meta name="theme-color" content="#0c0d12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Enten">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <script src="./pwa.js" defer></script>
+
+    <link rel="preload" href="./fonts/playfair-display-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="./styles.css">
+
+    <style>
+      :root {
+        --c-base: #0c0d12;
+        --c-cloud: #f4f4f2;
+        --c-cloud-muted: rgba(244, 244, 242, 0.6);
+        --c-cloud-faint: rgba(244, 244, 242, 0.1);
+        --c-cloud-hairline: rgba(244, 244, 242, 0.05);
+        --c-gold: #efa143;
+        --c-teal: #4cb2a8;
+        --font-display: "Playfair Display", Georgia, "Times New Roman", serif;
+        --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        --ease-float: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --layout-pad: clamp(24px, 5vw, 64px);
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        position: relative;
+        overflow: hidden;
+        background-color: var(--c-base);
+        color: var(--c-cloud);
+        cursor: crosshair;
+        font-family: var(--font-sans);
+        letter-spacing: 0;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      input[type="number"]::-webkit-outer-spin-button,
+      input[type="number"]::-webkit-inner-spin-button {
+        margin: 0;
+        -webkit-appearance: none;
+      }
+
+      input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+
+      ::selection {
+        background: var(--c-gold);
+        color: var(--c-base);
+      }
+
+      .bg-atmosphere-photo,
+      .bg-atmosphere-gradient,
+      .bg-horizon-glow {
+        position: fixed;
+        pointer-events: none;
+      }
+
+      .bg-atmosphere-photo {
+        top: 0;
+        left: 0;
+        z-index: -4;
+        width: 100vw;
+        height: 100vh;
+        background-image: url("https://images.unsplash.com/photo-1500462918059-b1a0cb512f1d?q=80&w=2560&auto=format&fit=crop");
+        background-position: center 30%;
+        background-size: cover;
+        filter: saturate(0.8) contrast(1.1);
+        mix-blend-mode: screen;
+        opacity: 0.2;
+      }
+
+      .bg-atmosphere-gradient {
+        top: 0;
+        left: 0;
+        z-index: -3;
+        width: 100vw;
+        height: 100vh;
+        background: linear-gradient(
+          180deg,
+          rgba(16, 28, 48, 0.6) 0%,
+          rgba(12, 13, 18, 0.9) 45%,
+          rgba(12, 13, 18, 1) 100%
+        );
+      }
+
+      .bg-horizon-glow {
+        bottom: 0;
+        left: 50%;
+        z-index: -2;
+        width: 150vw;
+        height: 60vh;
+        background: radial-gradient(
+          ellipse at center top,
+          rgba(239, 161, 67, 0.05) 0%,
+          rgba(76, 178, 168, 0.02) 40%,
+          transparent 70%
+        );
+        transform: translateX(-50%);
+      }
+
+      .crosshair-h,
+      .crosshair-v {
+        position: fixed;
+        z-index: 999;
+        background: rgba(244, 244, 242, 0.12);
+        mix-blend-mode: difference;
+        pointer-events: none;
+      }
+
+      .crosshair-h {
+        top: 50%;
+        left: 0;
+        width: 100vw;
+        height: 1px;
+      }
+
+      .crosshair-v {
+        top: 0;
+        left: 50%;
+        width: 1px;
+        height: 100vh;
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(20px);
+        transition:
+          opacity 1s var(--ease-float),
+          transform 1s var(--ease-float);
+      }
+
+      .reveal.active {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .swap-panel-grid {
+        background-image:
+          linear-gradient(rgba(244, 244, 242, 0.015) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(244, 244, 242, 0.015) 1px, transparent 1px);
+        background-size: 32px 32px;
+      }
+
+      .global-nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 100;
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: 28px;
+        padding: 32px var(--layout-pad);
+        transition: opacity 0.6s var(--ease-float);
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: clamp(22px, 3vw, 40px);
+        list-style: none;
+      }
+
+      .nav-links a,
+      .header-meta,
+      .connect-button,
+      .live-status {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .nav-links a {
+        color: var(--c-cloud);
+        transition: color 0.25s ease;
+        white-space: nowrap;
+      }
+
+      .nav-links a:hover,
+      .nav-links a[aria-current="page"] {
+        color: var(--c-gold);
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 18px;
+      }
+
+      .live-status,
+      .header-meta {
+        color: var(--c-cloud-muted);
+      }
+
+      .live-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--c-teal);
+        box-shadow: 0 0 18px rgba(76, 178, 168, 0.72);
+      }
+
+      .status-dot[data-state="warn"] {
+        background: var(--c-gold);
+        box-shadow: 0 0 18px rgba(239, 161, 67, 0.5);
+      }
+
+      .status-dot[data-state="idle"] {
+        background: rgba(244, 244, 242, 0.42);
+        box-shadow: none;
+      }
+
+      .connect-button {
+        color: var(--c-cloud);
+        transition: color 0.25s ease;
+        white-space: nowrap;
+      }
+
+      .connect-button:hover {
+        color: var(--c-gold);
+      }
+
+      .swap-page {
+        display: flex;
+        width: min(100%, 1440px);
+        height: 100vh;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto;
+        padding: 112px var(--layout-pad) 88px;
+      }
+
+      .portal-shell {
+        width: min(100%, 420px);
+      }
+
+      .sys-label {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 32px;
+      }
+
+      .sys-label::before {
+        width: 12px;
+        height: 1px;
+        background: var(--c-gold);
+        content: "";
+      }
+
+      .sys-label-text,
+      .field-label,
+      .balance,
+      .slippage-label,
+      .slippage-choice,
+      .meta-label,
+      .notice,
+      .wallet-debug {
+        font-family: var(--font-mono);
+      }
+
+      .sys-label-text {
+        color: var(--c-cloud-muted);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .portal-title {
+        margin-bottom: 8px;
+        font-family: var(--font-display);
+        font-size: 1.9rem;
+        font-weight: 400;
+        line-height: 1.12;
+      }
+
+      .portal-copy {
+        margin-bottom: 16px;
+        color: var(--c-cloud-muted);
+        font-size: 0.88rem;
+        font-weight: 300;
+        line-height: 1.65;
+      }
+
+      .swap-shell {
+        position: relative;
+        width: 100%;
+        padding: 14px;
+        border: 1px solid var(--c-cloud-faint);
+        background: rgba(12, 13, 18, 0.4);
+        backdrop-filter: blur(28px);
+      }
+
+      .swap-stack {
+        display: grid;
+        gap: 4px;
+      }
+
+      .swap-field {
+        min-width: 0;
+      }
+
+      .field-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 8px;
+      }
+
+      .field-label,
+      .slippage-label,
+      .meta-label {
+        color: var(--c-cloud-muted);
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .balance {
+        color: var(--c-cloud-muted);
+        font-size: 10px;
+        line-height: 1.35;
+        text-align: right;
+      }
+
+      .amount-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 58px;
+        padding: 10px;
+        border: 1px solid var(--c-cloud-hairline);
+        background: rgba(12, 13, 18, 0.6);
+        transition: border-color 0.25s ease;
+      }
+
+      .amount-row:focus-within {
+        border-color: rgba(239, 161, 67, 0.5);
+      }
+
+      .amount-input {
+        min-width: 0;
+        flex: 1;
+        background: transparent;
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 1.15rem;
+        outline: none;
+      }
+
+      .amount-input::placeholder {
+        color: rgba(244, 244, 242, 0.36);
+      }
+
+      .asset {
+        position: relative;
+        flex: 0 0 auto;
+      }
+
+      .asset-picker {
+        position: relative;
+      }
+
+      .asset-select {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--c-cloud-faint);
+        background: transparent;
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        transition: border-color 0.25s ease;
+      }
+
+      .asset-select:hover,
+      .asset-picker[data-open="true"] .asset-select {
+        border-color: var(--c-cloud-muted);
+      }
+
+      .asset-select:disabled {
+        cursor: default;
+      }
+
+      .token-orb {
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+      }
+
+      .token-orb.pay {
+        border: 1px solid rgba(76, 178, 168, 0.4);
+        background: rgba(76, 178, 168, 0.2);
+      }
+
+      .token-orb.receive {
+        border: 1px solid rgba(239, 161, 67, 0.4);
+        background: rgba(239, 161, 67, 0.2);
+      }
+
+      .asset-arrow {
+        width: 12px;
+        height: 12px;
+        color: var(--c-cloud-muted);
+        transition: transform 0.25s ease;
+      }
+
+      .asset-picker[data-open="true"] .asset-arrow {
+        transform: rotate(180deg);
+      }
+
+      .asset-select[data-fixed="true"] .asset-arrow {
+        display: none;
+      }
+
+      .asset-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        z-index: 20;
+        display: grid;
+        min-width: 148px;
+        gap: 6px;
+        padding: 8px;
+        border: 1px solid var(--c-cloud-faint);
+        background: rgba(12, 13, 18, 0.96);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
+        backdrop-filter: blur(18px);
+      }
+
+      .asset-menu[hidden] {
+        display: none;
+      }
+
+      .asset-option {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 34px;
+        padding: 0 10px;
+        border: 1px solid transparent;
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-align: left;
+        text-transform: uppercase;
+      }
+
+      .asset-option:hover,
+      .asset-option[data-selected="true"] {
+        border-color: rgba(239, 161, 67, 0.4);
+        background: rgba(239, 161, 67, 0.07);
+      }
+
+      .asset-option span + span {
+        color: var(--c-cloud-muted);
+        font-size: 9px;
+      }
+
+      .asset-name {
+        display: none;
+      }
+
+      .flip-wrap {
+        position: relative;
+        display: flex;
+        height: 20px;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .flip-wrap::before {
+        position: absolute;
+        width: 100%;
+        height: 1px;
+        background: var(--c-cloud-hairline);
+        content: "";
+      }
+
+      .flip-button {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border: 1px solid var(--c-cloud-faint);
+        border-radius: 999px;
+        background: var(--c-base);
+        color: var(--c-cloud-muted);
+        transition:
+          border-color 0.25s ease,
+          color 0.25s ease,
+          transform 0.25s ease;
+      }
+
+      .flip-button:hover {
+        border-color: var(--c-gold);
+        color: var(--c-gold);
+        transform: rotate(180deg);
+      }
+
+      .flip-button svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      .swap-controls {
+        display: grid;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .slippage-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 0 4px;
+      }
+
+      .slippage-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .slippage-label svg {
+        width: 12px;
+        height: 12px;
+        opacity: 0.4;
+      }
+
+      .slippage-options {
+        display: flex;
+        gap: 10px;
+      }
+
+      .slippage-choice {
+        min-height: 26px;
+        padding: 0 8px;
+        border: 1px solid var(--c-cloud-faint);
+        color: var(--c-cloud-muted);
+        font-size: 10px;
+      }
+
+      .slippage-choice.active {
+        border-color: var(--c-gold);
+        color: var(--c-gold);
+      }
+
+      .swap-submit {
+        display: flex;
+        width: 100%;
+        min-height: 40px;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        border: 1px solid var(--c-cloud-muted);
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        transition:
+          background-color 0.3s ease,
+          border-color 0.3s ease,
+          color 0.3s ease;
+      }
+
+      .swap-submit:hover {
+        border-color: var(--c-cloud);
+        background: var(--c-cloud);
+        color: var(--c-base);
+      }
+
+      .swap-submit svg {
+        width: 16px;
+        height: 16px;
+        transition: transform 0.3s ease;
+      }
+
+      .swap-submit:hover svg {
+        transform: translateX(4px);
+      }
+
+      .swap-metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--c-cloud-hairline);
+      }
+
+      .meta-label {
+        margin-bottom: 4px;
+        color: var(--c-cloud-muted);
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .meta-value {
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+
+      .meta-value.teal {
+        color: var(--c-teal);
+      }
+
+      .notice {
+        min-height: 18px;
+        margin-top: 12px;
+        color: var(--c-cloud-muted);
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .notice[data-tone="warn"] {
+        color: var(--c-gold);
+      }
+
+      .notice[data-tone="ok"] {
+        color: var(--c-teal);
+      }
+
+      .liquidity-warning {
+        display: grid;
+        max-width: 580px;
+        gap: 5px;
+        margin-top: 18px;
+        padding: 14px 16px;
+        border: 1px solid rgba(239, 161, 67, 0.48);
+        border-left: 4px solid var(--c-gold);
+        background: rgba(239, 161, 67, 0.11);
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .liquidity-warning-label {
+        color: var(--c-gold);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .swap-submit:disabled {
+        border-color: rgba(239, 161, 67, 0.46);
+        background: rgba(239, 161, 67, 0.1);
+        color: var(--c-gold);
+        opacity: 1;
+      }
+
+      .swap-submit:disabled:hover {
+        border-color: rgba(239, 161, 67, 0.46);
+        background: rgba(239, 161, 67, 0.1);
+        color: var(--c-gold);
+      }
+
+      .swap-submit:disabled:hover svg {
+        transform: none;
+      }
+
+      .wallet-debug {
+        margin-top: 6px;
+        color: rgba(244, 244, 242, 0.38);
+        font-size: 9px;
+        line-height: 1.45;
+      }
+
+      .portal-footer {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 24px var(--layout-pad);
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .footer-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px 48px;
+      }
+
+      @media (max-width: 980px) {
+        .nav-links {
+          display: none;
+        }
+
+        .header-meta {
+          display: none;
+        }
+      }
+
+      @media (max-width: 640px) {
+        body {
+          overflow-y: auto;
+          cursor: auto;
+        }
+
+        .global-nav {
+          padding-top: 26px;
+        }
+
+        .live-status {
+          display: none;
+        }
+
+        .swap-page {
+          height: auto;
+          min-height: 100vh;
+          padding-top: 116px;
+          padding-bottom: 140px;
+        }
+
+        .portal-title {
+          font-size: 1.65rem;
+        }
+
+        .field-head,
+        .slippage-row,
+        .portal-footer {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .balance {
+          text-align: left;
+        }
+
+        .slippage-options {
+          width: 100%;
+        }
+
+        .slippage-choice {
+          flex: 1;
+        }
+
+        .crosshair-h,
+        .crosshair-v {
+          display: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .reveal,
+        .nav-links a,
+        .connect-button,
+        .asset-select,
+        .flip-button,
+        .swap-submit,
+        .swap-submit svg {
+          transition: none;
+        }
+      }
+    </style>
+    <link rel="stylesheet" href="./nav.css">
+  </head>
+  <body>
+    <div class="bg-atmosphere-photo" aria-hidden="true"></div>
+    <div class="bg-atmosphere-gradient" aria-hidden="true"></div>
+    <div class="bg-horizon-glow" aria-hidden="true"></div>
+
+    <div class="crosshair-h" id="ch-h" aria-hidden="true"></div>
+    <div class="crosshair-v" id="ch-v" aria-hidden="true"></div>
+
+    <header class="global-nav enten-nav-shell">
+      <a class="logo" href="./index.html" aria-label="Enten home">Enten.</a>
+      <nav class="nav-menu" aria-label="Primary">
+        <ul class="nav-links">
+          <li><a href="./index.html" data-nav>Home</a></li>
+          <li><a href="./wallet.html" data-nav>Wallet</a></li>
+          <li class="nav-group">
+            <button class="nav-group-trigger" type="button" aria-haspopup="true">Launchpad</button>
+            <ul class="nav-dropdown">
+              <li><a href="./presale.html" data-nav>Presale</a></li>
+              <li><a href="./launch.html" data-nav>Launch Token</a></li>
+            </ul>
+          </li>
+          <li class="nav-group">
+            <button class="nav-group-trigger" type="button" aria-haspopup="true">Markets</button>
+            <ul class="nav-dropdown">
+              <li><a href="./auction.html" data-nav>Auctions</a></li>
+              <li><a href="./swap.html" data-nav>Portal</a></li>
+            </ul>
+          </li>
+          <li class="nav-group">
+            <button class="nav-group-trigger" type="button" aria-haspopup="true">Protocol</button>
+            <ul class="nav-dropdown">
+              <li><a href="./index.html#developers" data-nav>Developers</a></li>
+              <li><a href="./index.html#system" data-nav>System</a></li>
+              <li><a href="./docs.html" data-nav>Documentation</a></li>
+            </ul>
+          </li>
+        </ul>
+      </nav>
+      <div class="header-actions">
+        <div class="live-status">
+          <span class="status-dot" data-network-dot></span>
+          <span data-network-status>Mainnet Live</span>
+        </div>
+        <button class="connect-button" type="button" data-connect-wallet>Connect Wallet</button>
+        <div class="header-meta">[ v.2.4.0 ]</div>
+      </div>
+    </header>
+
+    <main class="swap-page" data-swap-page>
+      <section class="portal-shell reveal active" aria-labelledby="swap-title">
+        <div class="sys-label">
+          <div class="sys-label-text">SYS_05 // SWAP</div>
+        </div>
+
+        <div>
+          <h1 class="portal-title" id="swap-title">Atomic Exchange.</h1>
+          <p class="portal-copy">
+            Contract-routed swap execution through configured market paths. Quotes, slippage, approvals,
+            and final calldata are prepared before wallet submission.
+          </p>
+          <div class="liquidity-warning" id="swap-liquidity-warning" role="status" aria-live="polite">
+            <span class="liquidity-warning-label">Trading Not Live</span>
+            <span>Liquidity has not been added yet, so swaps are unavailable.</span>
+          </div>
+        </div>
+
+        <form class="swap-shell swap-panel-grid" aria-describedby="swap-liquidity-warning" data-swap-form>
+          <div class="swap-stack">
+            <div class="swap-field">
+              <div class="field-head">
+                <label class="field-label" for="sellAmount">Sell</label>
+                <span class="balance" data-pay-balance>Balance: 0</span>
+              </div>
+              <div class="amount-row">
+                <input
+                  class="amount-input"
+                  id="sellAmount"
+                  name="sellAmount"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="0.00"
+                  step="0.01"
+                  autocomplete="off"
+                  aria-label="Pay amount"
+                  data-pay-input
+                >
+                <div class="asset">
+                  <div class="asset-picker" data-asset-picker>
+                    <button class="asset-select" type="button" aria-label="Pay asset" aria-haspopup="listbox" aria-expanded="false" data-pay-asset data-pay-symbol>
+                      <span class="token-orb pay" aria-hidden="true"></span>
+                      <span data-asset-symbol-label>USDC</span>
+                      <svg class="asset-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                      </svg>
+                    </button>
+                    <div class="asset-menu" role="listbox" data-asset-menu hidden></div>
+                  </div>
+                  <span class="asset-name" data-pay-name>USD Coin</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flip-wrap">
+              <button class="flip-button" type="button" data-flip-swap aria-label="Flip swap direction">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+                </svg>
+              </button>
+            </div>
+
+            <div class="swap-field">
+              <div class="field-head">
+                <label class="field-label" for="buyAmount">Buy (Estimated)</label>
+                <span class="balance" data-receive-balance>Balance: 0</span>
+              </div>
+              <div class="amount-row">
+                <input
+                  class="amount-input"
+                  id="buyAmount"
+                  name="buyAmount"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="0.00"
+                  step="0.01"
+                  autocomplete="off"
+                  readonly
+                  aria-label="Receive amount"
+                  data-receive-input
+                >
+                <div class="asset">
+                  <div class="asset-picker" data-asset-picker>
+                    <button class="asset-select" type="button" aria-label="Receive asset" aria-haspopup="listbox" aria-expanded="false" data-receive-asset data-receive-symbol>
+                      <span class="token-orb receive" aria-hidden="true"></span>
+                      <span data-asset-symbol-label>ENTEN</span>
+                      <svg class="asset-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                      </svg>
+                    </button>
+                    <div class="asset-menu" role="listbox" data-asset-menu hidden></div>
+                  </div>
+                  <span class="asset-name" data-receive-name>Enten</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="swap-controls">
+            <div class="slippage-row">
+              <div class="slippage-label">
+                Slippage Tolerance
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+              </div>
+              <div class="slippage-options" aria-hidden="true">
+                <button class="slippage-choice" type="button" tabindex="-1">0.1%</button>
+                <button class="slippage-choice active" type="button" tabindex="-1">0.5%</button>
+                <button class="slippage-choice" type="button" tabindex="-1">1.0%</button>
+              </div>
+            </div>
+
+            <button class="swap-submit" type="submit" disabled aria-disabled="true" data-swap-submit>
+              Trading Not Live
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="swap-metrics">
+            <div>
+              <div class="meta-label">Price Impact</div>
+              <div class="meta-value teal" data-price-label>&lt; 0.01%</div>
+            </div>
+            <div>
+              <div class="meta-label">Route</div>
+              <div class="meta-value" data-route-label>Configured Route</div>
+            </div>
+          </div>
+
+          <p class="notice" data-page-status>Trading is not live yet. Liquidity has not been added, so swaps are unavailable.</p>
+          <p class="wallet-debug" data-wallet-debug>Checking wallet provider...</p>
+          <span hidden data-swap-address>Not configured</span>
+        </form>
+      </section>
+
+      <footer class="portal-footer reveal active">
+        <div class="footer-stats">
+          <div>Gas: Wallet Estimated</div>
+          <div>Liquidity: Route Dependent</div>
+          <div>Router: Configured Endpoint</div>
+        </div>
+        <div>(C) 2026 Enten Protocol</div>
+      </footer>
+    </main>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var chH = document.getElementById("ch-h");
+        var chV = document.getElementById("ch-v");
+
+        if (chH && chV && !window.matchMedia("(pointer: coarse)").matches) {
+          document.addEventListener("mousemove", function (event) {
+            window.requestAnimationFrame(function () {
+              chH.style.top = event.clientY + "px";
+              chV.style.left = event.clientX + "px";
+            });
+          });
+        }
+      })();
+    </script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

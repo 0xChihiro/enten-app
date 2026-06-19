@@ -1,0 +1,43 @@
+{
+  "assets": [
+    "/app-auction.js",
+    "/app-launch.js",
+    "/app-presale.js",
+    "/app-swap.js",
+    "/app-wallet.js",
+    "/app.js",
+    "/assets/ccip-NTOEQEEG.js",
+    "/assets/chunk-5YRGMNB2.js",
+    "/assets/chunk-FWEFZG3R.js",
+    "/assets/chunk-XBNRSG5M.js",
+    "/assets/chunk-XOK2JOTM.js",
+    "/assets/native-TZZBMZZJ.js",
+    "/assets/secp256k1-WADPWTA3.js",
+    "/fonts/inter-latin-wght-normal.woff2",
+    "/fonts/jetbrains-mono-latin-wght-normal.woff2",
+    "/fonts/playfair-display-latin-wght-italic.woff2",
+    "/fonts/playfair-display-latin-wght-normal.woff2",
+    "/moss-runtime.js",
+    "/viem-runtime.js"
+  ],
+  "precache": [
+    "/app-auction.js",
+    "/app-launch.js",
+    "/app-presale.js",
+    "/app-swap.js",
+    "/app-wallet.js",
+    "/app.js",
+    "/assets/ccip-NTOEQEEG.js",
+    "/assets/chunk-5YRGMNB2.js",
+    "/assets/chunk-FWEFZG3R.js",
+    "/assets/chunk-XBNRSG5M.js",
+    "/assets/chunk-XOK2JOTM.js",
+    "/assets/native-TZZBMZZJ.js",
+    "/assets/secp256k1-WADPWTA3.js",
+    "/fonts/inter-latin-wght-normal.woff2",
+    "/fonts/jetbrains-mono-latin-wght-normal.woff2",
+    "/fonts/playfair-display-latin-wght-italic.woff2",
+    "/fonts/playfair-display-latin-wght-normal.woff2",
+    "/viem-runtime.js"
+  ]
+}

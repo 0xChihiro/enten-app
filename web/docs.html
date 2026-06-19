@@ -1,0 +1,1616 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Enten | Documentation // Protocol Architecture</title>
+    <meta name="theme-color" content="#0c0d12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Enten">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <script src="./pwa.js" defer></script>
+
+    <link rel="preload" href="./fonts/playfair-display-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="./styles.css">
+
+    <style>
+      :root {
+        --c-base: #0c0d12;
+        --c-cloud: #f4f4f2;
+        --c-cloud-muted: rgba(244, 244, 242, 0.64);
+        --c-cloud-faint: rgba(244, 244, 242, 0.1);
+        --c-cloud-hairline: rgba(244, 244, 242, 0.05);
+        --c-gold: #efa143;
+        --c-teal: #4cb2a8;
+        --font-display: "Playfair Display", Georgia, "Times New Roman", serif;
+        --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        --ease-float: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --layout-pad: clamp(24px, 5vw, 64px);
+      }
+
+      html {
+        min-height: 100%;
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-height: 100%;
+        overflow-x: hidden;
+        background-color: var(--c-base);
+        color: var(--c-cloud);
+        cursor: crosshair;
+        font-family: var(--font-sans);
+        letter-spacing: 0;
+        -moz-osx-font-smoothing: grayscale;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      ::selection {
+        background-color: var(--c-gold);
+        color: var(--c-base);
+      }
+
+      ::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: rgba(244, 244, 242, 0.12);
+      }
+
+      .bg-atmosphere-photo,
+      .bg-atmosphere-gradient {
+        position: fixed;
+        pointer-events: none;
+      }
+
+      .bg-atmosphere-photo {
+        top: 0;
+        left: 0;
+        z-index: -4;
+        width: 100vw;
+        height: 100vh;
+        background-image: url("https://images.unsplash.com/photo-1500462918059-b1a0cb512f1d?q=80&w=2560&auto=format&fit=crop");
+        background-position: center 30%;
+        background-size: cover;
+        filter: saturate(0.8) contrast(1.1) blur(10px);
+        mix-blend-mode: screen;
+        opacity: 0.15;
+      }
+
+      .bg-atmosphere-gradient {
+        top: 0;
+        left: 0;
+        z-index: -3;
+        width: 100vw;
+        height: 100vh;
+        background: linear-gradient(
+          180deg,
+          rgba(16, 28, 48, 0.4) 0%,
+          rgba(12, 13, 18, 0.95) 45%,
+          rgba(12, 13, 18, 1) 100%
+        );
+      }
+
+      .crosshair-h,
+      .crosshair-v {
+        position: fixed;
+        z-index: 999;
+        background: rgba(244, 244, 242, 0.1);
+        mix-blend-mode: difference;
+        pointer-events: none;
+      }
+
+      .crosshair-h {
+        top: 50%;
+        left: 0;
+        width: 100vw;
+        height: 1px;
+      }
+
+      .crosshair-v {
+        top: 0;
+        left: 50%;
+        width: 1px;
+        height: 100vh;
+      }
+
+      .global-nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 100;
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: 28px;
+        padding: 32px var(--layout-pad);
+        border-bottom: 1px solid var(--c-cloud-hairline);
+        background: rgba(12, 13, 18, 0.8);
+        backdrop-filter: blur(16px);
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: clamp(22px, 3vw, 40px);
+        list-style: none;
+      }
+
+      .nav-links a,
+      .header-meta,
+      .search-trigger,
+      .section-kicker,
+      .sidebar-title,
+      .sidebar-link,
+      .topic-link,
+      .footer-bottom {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .nav-links a {
+        color: var(--c-cloud);
+        transition: color 0.35s var(--ease-float);
+      }
+
+      .nav-links a:hover,
+      .nav-links a:focus-visible,
+      .nav-links a[aria-current="page"] {
+        color: var(--c-gold);
+      }
+
+      .header-meta {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 18px;
+        color: var(--c-cloud-muted);
+      }
+
+      .search-trigger {
+        color: rgba(244, 244, 242, 0.42);
+        transition: color 0.35s var(--ease-float);
+      }
+
+      .search-trigger:hover,
+      .search-trigger:focus-visible {
+        color: var(--c-cloud);
+      }
+
+      .docs-shell {
+        display: flex;
+        min-height: 100vh;
+        padding-top: 128px;
+      }
+
+      .docs-sidebar {
+        position: fixed;
+        top: 128px;
+        left: 0;
+        width: 288px;
+        height: calc(100vh - 128px);
+        padding: 0 40px 48px var(--layout-pad);
+        overflow-y: auto;
+        border-right: 1px solid var(--c-cloud-hairline);
+      }
+
+      .sidebar-nav {
+        display: grid;
+        gap: 40px;
+        padding-top: 8px;
+      }
+
+      .sidebar-title {
+        margin-bottom: 22px;
+        color: var(--c-cloud-muted);
+      }
+
+      .sidebar-title.is-active {
+        color: var(--c-gold);
+      }
+
+      .sidebar-list {
+        display: grid;
+        gap: 15px;
+        list-style: none;
+      }
+
+      .sidebar-link {
+        display: inline-flex;
+        color: var(--c-cloud-muted);
+        line-height: 1.45;
+        text-align: left;
+        transition:
+          color 0.35s var(--ease-float),
+          transform 0.35s var(--ease-float);
+      }
+
+      .sidebar-link:hover,
+      .sidebar-link:focus-visible,
+      .sidebar-link[aria-current="page"] {
+        color: var(--c-cloud);
+      }
+
+      .sidebar-link[aria-current="page"] {
+        transform: translateX(6px);
+      }
+
+      .docs-main {
+        flex: 1;
+        min-width: 0;
+        margin-left: 288px;
+        padding: 0 var(--layout-pad) 72px clamp(56px, 7vw, 112px);
+      }
+
+      .docs-hero {
+        max-width: 860px;
+        margin-bottom: 72px;
+      }
+
+      .section-kicker {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 28px;
+        color: var(--c-cloud-muted);
+      }
+
+      .section-kicker::before {
+        display: block;
+        width: 12px;
+        height: 1px;
+        background: var(--c-gold);
+        content: "";
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family: var(--font-display);
+        font-weight: 400;
+        letter-spacing: 0;
+        line-height: 1.08;
+      }
+
+      .docs-hero h1 {
+        max-width: 780px;
+        margin-bottom: 24px;
+        font-size: clamp(3rem, 6vw, 5.5rem);
+      }
+
+      .docs-hero p {
+        max-width: 660px;
+        color: var(--c-cloud-muted);
+        font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+        font-weight: 300;
+        line-height: 1.7;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 34px;
+      }
+
+      .hero-action {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 26px;
+        border: 1px solid var(--c-cloud-faint);
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        transition:
+          border-color 0.35s var(--ease-float),
+          background 0.35s var(--ease-float),
+          color 0.35s var(--ease-float);
+      }
+
+      .hero-action.primary {
+        border-color: var(--c-cloud);
+        background: var(--c-cloud);
+        color: var(--c-base);
+      }
+
+      .hero-action:hover,
+      .hero-action:focus-visible {
+        border-color: var(--c-gold);
+        background: var(--c-gold);
+        color: var(--c-base);
+      }
+
+      .topic-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        max-width: 1120px;
+        margin-bottom: 72px;
+      }
+
+      .topic-card {
+        position: relative;
+        min-height: 270px;
+        overflow: hidden;
+        border: 1px solid var(--c-cloud-hairline);
+        background: rgba(12, 13, 18, 0.32);
+        padding: 32px;
+        transition:
+          border-color 0.5s var(--ease-float),
+          transform 0.5s var(--ease-float);
+      }
+
+      .topic-card::before {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        background: radial-gradient(circle at 50% 50%, rgba(239, 161, 67, 0.1) 0%, transparent 70%);
+        content: "";
+        transition: opacity 0.5s var(--ease-float);
+      }
+
+      .topic-card.is-teal::before {
+        background: radial-gradient(circle at 50% 50%, rgba(76, 178, 168, 0.1) 0%, transparent 70%);
+      }
+
+      .topic-card:hover,
+      .topic-card:focus-visible {
+        border-color: rgba(239, 161, 67, 0.32);
+        transform: translateY(-4px);
+      }
+
+      .topic-card.is-teal:hover,
+      .topic-card.is-teal:focus-visible {
+        border-color: rgba(76, 178, 168, 0.32);
+      }
+
+      .topic-card:hover::before,
+      .topic-card:focus-visible::before {
+        opacity: 1;
+      }
+
+      .topic-inner {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        min-height: 206px;
+        flex-direction: column;
+      }
+
+      .topic-index {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        margin-bottom: 32px;
+        border: 1px solid var(--c-cloud-faint);
+        color: var(--c-gold);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+      }
+
+      .topic-card.is-teal .topic-index {
+        color: var(--c-teal);
+      }
+
+      .topic-card h2 {
+        margin-bottom: 16px;
+        font-size: 1.45rem;
+      }
+
+      .topic-card p {
+        color: var(--c-cloud-muted);
+        font-size: 0.9rem;
+        font-weight: 300;
+        line-height: 1.65;
+      }
+
+      .topic-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: auto;
+        color: var(--c-cloud-muted);
+        transition:
+          color 0.35s var(--ease-float),
+          gap 0.35s var(--ease-float);
+      }
+
+      .topic-card:hover .topic-link,
+      .topic-card:focus-visible .topic-link {
+        gap: 16px;
+        color: var(--c-gold);
+      }
+
+      .topic-card.is-teal:hover .topic-link,
+      .topic-card.is-teal:focus-visible .topic-link {
+        color: var(--c-teal);
+      }
+
+      .reader-shell {
+        display: grid;
+        max-width: 1120px;
+        grid-template-columns: minmax(0, 1fr) 220px;
+        gap: 44px;
+        align-items: start;
+        padding-top: 20px;
+      }
+
+      .doc-panel {
+        min-width: 0;
+        border: 1px solid var(--c-cloud-hairline);
+        background:
+          linear-gradient(rgba(244, 244, 242, 0.018) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(244, 244, 242, 0.018) 1px, transparent 1px),
+          rgba(12, 13, 18, 0.38);
+        background-size: 28px 28px;
+        backdrop-filter: blur(18px);
+      }
+
+      .doc-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        min-height: 56px;
+        padding: 0 26px;
+        border-bottom: 1px solid var(--c-cloud-hairline);
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 0.625rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .doc-article {
+        padding: clamp(28px, 5vw, 56px);
+      }
+
+      .doc-article > * + * {
+        margin-top: 20px;
+      }
+
+      .doc-article h1,
+      .doc-article h2,
+      .doc-article h3 {
+        color: var(--c-cloud);
+      }
+
+      .doc-article h1 {
+        margin-bottom: 28px;
+        font-size: clamp(2.5rem, 4.5vw, 4.25rem);
+      }
+
+      .doc-article h2 {
+        margin-top: 48px;
+        padding-top: 32px;
+        border-top: 1px solid var(--c-cloud-hairline);
+        font-size: clamp(1.85rem, 3vw, 2.6rem);
+      }
+
+      .doc-article h3 {
+        margin-top: 34px;
+        font-size: 1.35rem;
+      }
+
+      .doc-article p,
+      .doc-article li {
+        color: var(--c-cloud-muted);
+        font-size: 1rem;
+        font-weight: 300;
+        line-height: 1.78;
+      }
+
+      .doc-article ul,
+      .doc-article ol {
+        display: grid;
+        gap: 10px;
+        padding-left: 22px;
+      }
+
+      .doc-article strong {
+        color: var(--c-cloud);
+        font-weight: 500;
+      }
+
+      .doc-article em {
+        color: rgba(244, 244, 242, 0.84);
+        font-style: italic;
+      }
+
+      .doc-article a {
+        color: var(--c-gold);
+      }
+
+      .doc-article code {
+        border: 1px solid var(--c-cloud-hairline);
+        background: rgba(244, 244, 242, 0.05);
+        color: var(--c-teal);
+        font-family: var(--font-mono);
+        font-size: 0.85em;
+        padding: 0.15em 0.4em;
+      }
+
+      .doc-article pre {
+        overflow-x: auto;
+        border: 1px solid var(--c-cloud-faint);
+        background: rgba(5, 6, 10, 0.64);
+        padding: 20px;
+      }
+
+      .doc-article pre code {
+        display: block;
+        border: 0;
+        background: transparent;
+        color: var(--c-cloud-muted);
+        font-size: 0.8125rem;
+        line-height: 1.8;
+        padding: 0;
+      }
+
+      .doc-article table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+      }
+
+      .doc-article th,
+      .doc-article td {
+        border: 1px solid var(--c-cloud-hairline);
+        padding: 10px 14px;
+        text-align: left;
+        color: var(--c-cloud-muted);
+        font-weight: 300;
+        line-height: 1.6;
+        vertical-align: top;
+      }
+
+      .doc-article th {
+        color: var(--c-cloud);
+        font-weight: 500;
+        background: rgba(244, 244, 242, 0.05);
+      }
+
+      .doc-article blockquote {
+        border-left: 1px solid var(--c-gold);
+        color: var(--c-cloud-muted);
+        padding: 4px 0 4px 22px;
+      }
+
+      .doc-article blockquote p {
+        color: rgba(244, 244, 242, 0.82);
+      }
+
+      .doc-toc {
+        position: sticky;
+        top: 152px;
+        display: grid;
+        gap: 14px;
+        border-left: 1px solid var(--c-cloud-hairline);
+        padding-left: 18px;
+      }
+
+      .toc-label,
+      .toc-link {
+        font-family: var(--font-mono);
+        font-size: 0.625rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .toc-label {
+        color: var(--c-gold);
+      }
+
+      #doc-toc-links {
+        display: grid;
+        gap: 16px;
+      }
+
+      .toc-link {
+        display: block;
+        color: var(--c-cloud-muted);
+        line-height: 1.35;
+        transition: color 0.35s var(--ease-float);
+      }
+
+      .toc-link--sub {
+        padding-left: 14px;
+        opacity: 0.82;
+      }
+
+      .toc-link:hover,
+      .toc-link:focus-visible {
+        color: var(--c-cloud);
+      }
+
+      .footer-bottom {
+        display: flex;
+        max-width: 1120px;
+        justify-content: space-between;
+        gap: 24px;
+        margin-top: 96px;
+        border-top: 1px solid var(--c-cloud-hairline);
+        padding-top: 28px;
+        color: var(--c-cloud-muted);
+      }
+
+      .footer-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 22px clamp(26px, 4vw, 48px);
+      }
+
+      .search-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 250;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 120px 24px 24px;
+        background: rgba(12, 13, 18, 0.72);
+        backdrop-filter: blur(18px);
+      }
+
+      .search-overlay[data-open="true"] {
+        display: flex;
+      }
+
+      .search-panel {
+        width: min(680px, 100%);
+        border: 1px solid var(--c-cloud-faint);
+        background: rgba(12, 13, 18, 0.96);
+        box-shadow: 0 32px 100px rgba(0, 0, 0, 0.34);
+      }
+
+      .search-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--c-cloud-hairline);
+      }
+
+      .search-input {
+        min-width: 0;
+        flex: 1;
+        background: transparent;
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        outline: none;
+      }
+
+      .search-close {
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .search-results {
+        display: grid;
+        gap: 1px;
+        max-height: 420px;
+        overflow-y: auto;
+        background: var(--c-cloud-hairline);
+      }
+
+      .search-result {
+        display: grid;
+        gap: 8px;
+        background: var(--c-base);
+        padding: 18px 20px;
+        text-align: left;
+      }
+
+      .search-result strong {
+        color: var(--c-cloud);
+        font-family: var(--font-display);
+        font-size: 1.2rem;
+        font-weight: 400;
+      }
+
+      .search-result span {
+        color: var(--c-cloud-muted);
+        font-size: 0.85rem;
+        font-weight: 300;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 1100px) {
+        .global-nav {
+          align-items: flex-start;
+        }
+
+        .nav-links {
+          display: none;
+        }
+
+        .docs-shell {
+          display: block;
+          padding-top: 118px;
+        }
+
+        .docs-sidebar {
+          position: static;
+          width: auto;
+          height: auto;
+          padding: 0 var(--layout-pad) 32px;
+          border-right: 0;
+          border-bottom: 1px solid var(--c-cloud-hairline);
+        }
+
+        .sidebar-nav {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 24px;
+        }
+
+        .docs-main {
+          margin-left: 0;
+          padding: 44px var(--layout-pad) 72px;
+        }
+
+        .reader-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .doc-toc {
+          position: static;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .global-nav {
+          padding: 24px var(--layout-pad);
+        }
+
+        .header-meta {
+          display: none;
+        }
+
+        .docs-shell {
+          padding-top: 92px;
+        }
+
+        .sidebar-nav,
+        .topic-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .topic-card {
+          min-height: auto;
+        }
+
+        .topic-inner {
+          min-height: 210px;
+        }
+
+        .footer-bottom {
+          flex-direction: column;
+        }
+
+        .doc-panel-header {
+          align-items: flex-start;
+          flex-direction: column;
+          padding: 18px 20px;
+        }
+
+        .doc-article {
+          padding: 26px 20px;
+        }
+
+        .doc-toc {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .nav-links a,
+        .search-trigger,
+        .sidebar-link,
+        .hero-action,
+        .topic-card,
+        .topic-card::before,
+        .topic-link,
+        .toc-link {
+          transition: none;
+        }
+      }
+    </style>
+    <link rel="stylesheet" href="./nav.css">
+  </head>
+  <body>
+    <div class="bg-atmosphere-photo" aria-hidden="true"></div>
+    <div class="bg-atmosphere-gradient" aria-hidden="true"></div>
+
+    <div class="crosshair-h" id="ch-h" aria-hidden="true"></div>
+    <div class="crosshair-v" id="ch-v" aria-hidden="true"></div>
+
+    <header class="global-nav enten-nav-shell">
+      <a class="logo" href="./index.html" aria-label="Enten home">Enten.</a>
+      <nav class="nav-menu" aria-label="Primary">
+        <ul class="nav-links">
+          <li><a href="./index.html">Home</a></li>
+          <li><a href="./wallet.html">Wallet</a></li>
+          <li class="nav-group">
+            <button class="nav-group-trigger" type="button" aria-haspopup="true">Launchpad</button>
+            <ul class="nav-dropdown">
+              <li><a href="./presale.html">Presale</a></li>
+              <li><a href="./launch.html">Launch Token</a></li>
+            </ul>
+          </li>
+          <li class="nav-group">
+            <button class="nav-group-trigger" type="button" aria-haspopup="true">Markets</button>
+            <ul class="nav-dropdown">
+              <li><a href="./auction.html">Auctions</a></li>
+              <li><a href="./swap.html">Portal</a></li>
+            </ul>
+          </li>
+          <li class="nav-group">
+            <button class="nav-group-trigger" type="button" aria-haspopup="true">Protocol</button>
+            <ul class="nav-dropdown">
+              <li><a href="./docs.html#integration-notes">Developers</a></li>
+              <li><a href="./docs.html#protocol-model">System</a></li>
+              <li><a href="./docs.html" aria-current="page">Documentation</a></li>
+            </ul>
+          </li>
+        </ul>
+      </nav>
+      <div class="header-meta">
+        <button class="search-trigger" type="button" data-search-toggle>Search [Cmd+K]</button>
+        <span>[ v.2.4.0 ]</span>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar" aria-label="Documentation sections">
+        <nav class="sidebar-nav">
+          <section data-doc-group="introduction">
+            <h2 class="sidebar-title is-active">Introduction</h2>
+            <ul class="sidebar-list">
+              <li><a class="sidebar-link" href="#overview" data-doc-link="overview">Overview</a></li>
+              <li><a class="sidebar-link" href="#protocol-model" data-doc-link="protocol-model">The Enten Model</a></li>
+              <li><a class="sidebar-link" href="#contracts" data-doc-link="contracts">Contracts</a></li>
+              <li><a class="sidebar-link" href="#glossary" data-doc-link="glossary">Glossary</a></li>
+            </ul>
+          </section>
+
+          <section data-doc-group="launches">
+            <h2 class="sidebar-title">Launches</h2>
+            <ul class="sidebar-list">
+              <li><a class="sidebar-link" href="#launching-your-own-token" data-doc-link="launching-your-own-token">Launching Tokens</a></li>
+              <li><a class="sidebar-link" href="#enten-built-modules-and-policies" data-doc-link="enten-built-modules-and-policies">Modules &amp; Policies</a></li>
+            </ul>
+          </section>
+
+          <section data-doc-group="mechanics">
+            <h2 class="sidebar-title">Core Mechanics</h2>
+            <ul class="sidebar-list">
+              <li><a class="sidebar-link" href="#portal-swaps" data-doc-link="portal-swaps">Routing &amp; Swaps</a></li>
+              <li><a class="sidebar-link" href="#auction-system" data-doc-link="auction-system">Auction System</a></li>
+              <li><a class="sidebar-link" href="#borrowing-and-redemption" data-doc-link="borrowing-and-redemption">Borrowing &amp; Redemption</a></li>
+              <li><a class="sidebar-link" href="#treasury-and-liquidity" data-doc-link="treasury-and-liquidity">Treasury &amp; Liquidity</a></li>
+              <li><a class="sidebar-link" href="#wallet-connection" data-doc-link="wallet-connection">Accounts &amp; Permissions</a></li>
+            </ul>
+          </section>
+
+          <section data-doc-group="developers">
+            <h2 class="sidebar-title">Developers</h2>
+            <ul class="sidebar-list">
+              <li><a class="sidebar-link" href="#architecture" data-doc-link="architecture">Architecture</a></li>
+              <li><a class="sidebar-link" href="#building-modules-and-policies" data-doc-link="building-modules-and-policies">Building Modules &amp; Policies</a></li>
+              <li><a class="sidebar-link" href="#deployment" data-doc-link="deployment">Deployment Addresses</a></li>
+              <li><a class="sidebar-link" href="#integration-notes" data-doc-link="integration-notes">System Integration</a></li>
+              <li><a class="sidebar-link" href="#contracts" data-doc-link="contracts">Contract Interfaces</a></li>
+            </ul>
+          </section>
+        </nav>
+      </aside>
+
+      <main class="docs-main">
+        <section class="docs-hero">
+          <div class="section-kicker" data-doc-hero-section>DOCS_01 // INTRODUCTION</div>
+          <h1 data-doc-hero-title>Building the next phase of onchain market systems.</h1>
+          <p data-doc-hero-summary>
+            Enten documentation covers the smart contracts and system mechanics behind launches,
+            auctions, vault accounting, routing, modules, policies, and protocol-level integrations.
+          </p>
+          <div class="hero-actions">
+            <a class="hero-action primary" href="#overview" data-doc-link="overview">Getting Started</a>
+            <a class="hero-action" href="#contracts" data-doc-link="contracts">Contract Interfaces</a>
+          </div>
+        </section>
+
+        <section class="topic-grid" aria-label="Featured documentation topics">
+          <a class="topic-card" href="#auction-system" data-doc-link="auction-system">
+            <span class="topic-inner">
+              <span class="topic-index">01</span>
+              <h2>Auction System</h2>
+              <p>Read how epoch allocation, price decay, available supply, and backing invariants work at the contract level.</p>
+              <span class="topic-link">Learn more <span aria-hidden="true">-&gt;</span></span>
+            </span>
+          </a>
+
+          <a class="topic-card is-teal" href="#portal-swaps" data-doc-link="portal-swaps">
+            <span class="topic-inner">
+              <span class="topic-index">02</span>
+              <h2>Routing &amp; Swaps</h2>
+              <p>Understand how supported routing paths, approvals, and execution boundaries fit into Enten systems.</p>
+              <span class="topic-link">Learn more <span aria-hidden="true">-&gt;</span></span>
+            </span>
+          </a>
+
+          <a class="topic-card" href="#contracts" data-doc-link="contracts">
+            <span class="topic-inner">
+              <span class="topic-index">03</span>
+              <h2>Contract Interfaces</h2>
+              <p>Map public system behavior back to the contracts, modules, policies, and deployment addresses.</p>
+              <span class="topic-link">Learn more <span aria-hidden="true">-&gt;</span></span>
+            </span>
+          </a>
+
+          <a class="topic-card is-teal" href="#launching-your-own-token" data-doc-link="launching-your-own-token">
+            <span class="topic-inner">
+              <span class="topic-index">04</span>
+              <h2>Launch Tokens</h2>
+              <p>Follow the launch flow from frontend setup through core contracts, backing, permissions, and governance handoff.</p>
+              <span class="topic-link">Learn more <span aria-hidden="true">-&gt;</span></span>
+            </span>
+          </a>
+
+          <a class="topic-card" href="#enten-built-modules-and-policies" data-doc-link="enten-built-modules-and-policies">
+            <span class="topic-inner">
+              <span class="topic-index">05</span>
+              <h2>Modules &amp; Policies</h2>
+              <p>Review the built-in Enten capabilities and how policies pair with modules to expose bounded system authority.</p>
+              <span class="topic-link">Learn more <span aria-hidden="true">-&gt;</span></span>
+            </span>
+          </a>
+        </section>
+
+        <section class="reader-shell" id="reader" aria-live="polite">
+          <div class="doc-panel">
+            <div class="doc-panel-header">
+              <span data-doc-section>DOCS // OVERVIEW</span>
+              <span data-doc-source>web/docs/overview.md</span>
+            </div>
+            <article class="doc-article" id="doc-article">
+              <h1>Loading documentation.</h1>
+            </article>
+          </div>
+
+          <aside class="doc-toc" aria-label="Current document outline">
+            <div class="toc-label">On This Page</div>
+            <div id="doc-toc-links"></div>
+          </aside>
+        </section>
+
+        <footer class="footer-bottom">
+          <div class="footer-meta">
+            <div>Documentation Status: Draft</div>
+            <div>Updated: 11 Jun 2026</div>
+            <div>Network: Configured Wallet</div>
+          </div>
+          <div>&copy; 2026 Enten Protocol</div>
+        </footer>
+      </main>
+    </div>
+
+    <div class="search-overlay" data-search-overlay aria-hidden="true">
+      <div class="search-panel" role="dialog" aria-modal="true" aria-label="Search documentation">
+        <div class="search-head">
+          <input class="search-input" type="search" placeholder="Search documentation" data-search-input>
+          <button class="search-close" type="button" data-search-close>Close</button>
+        </div>
+        <div class="search-results" data-search-results></div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var docs = {
+          "overview": {
+            title: "Overview",
+            section: "DOCS_01 // INTRODUCTION",
+            path: "./docs/overview.md",
+            group: "introduction",
+            summary: "Core Enten system components, invariants, and launch architecture.",
+            heroTitle: "Building the next phase of onchain market systems.",
+            heroSummary:
+              "Enten documentation covers the smart contracts and system mechanics behind launches, auctions, vault accounting, routing, modules, policies, and protocol-level integrations."
+          },
+          "protocol-model": {
+            title: "The Enten Model",
+            section: "DOCS_02 // MODEL",
+            path: "./docs/protocol-model.md",
+            group: "introduction",
+            summary: "Controller, Kernel, Vault, Token, module, and policy relationships.",
+            heroTitle: "How Enten systems hold state, authority, and accounting together.",
+            heroSummary:
+              "Map the core contracts and replaceable modules that let each launch keep shared invariants while adapting its market design."
+          },
+          "auction-system": {
+            title: "Auction System",
+            section: "DOCS_03 // AUCTIONS",
+            path: "./docs/auction-system.md",
+            group: "mechanics",
+            summary: "Epoch allocation, price decay, remaining supply, backing rules, and purchase flow.",
+            heroTitle: "Descending-price allocation mechanics for Enten markets.",
+            heroSummary:
+              "Understand how auction lots, live pricing, backing floors, approvals, and buy transactions fit together."
+          },
+          "portal-swaps": {
+            title: "Routing & Swaps",
+            section: "DOCS_04 // PORTAL",
+            path: "./docs/portal-swaps.md",
+            group: "mechanics",
+            summary: "Supported routing paths, approvals, and execution boundaries inside Enten systems.",
+            heroTitle: "Routing assets through explicit execution boundaries.",
+            heroSummary:
+              "Follow how approvals, route contracts, slippage controls, and system accounting interact across swap and routing flows."
+          },
+          "wallet-connection": {
+            title: "Accounts & Permissions",
+            section: "DOCS_05 // PERMISSIONS",
+            path: "./docs/wallet-connection.md",
+            group: "mechanics",
+            summary: "How callers, approvals, public functions, and policy-controlled permissions interact.",
+            heroTitle: "Wallet actions, approvals, and contract authority.",
+            heroSummary:
+              "Separate signer responsibility from policy-level permissioning so every call path has a clear authority boundary."
+          },
+          "contracts": {
+            title: "Contract Interfaces",
+            section: "DOCS_06 // CONTRACTS",
+            path: "./docs/contracts.md",
+            group: "introduction",
+            summary: "Repositories, deployment addresses, public functions, modules, policies, and interfaces.",
+            heroTitle: "Contract surfaces and repository references.",
+            heroSummary:
+              "Use this page as the index for Enten source repositories, public addresses, and interface-level integration references."
+          },
+          "deployment": {
+            title: "Deployment Addresses",
+            section: "DOCS_07 // DEPLOYMENT",
+            path: "./docs/deployment.md",
+            group: "developers",
+            summary: "Network-level deployment addresses for Enten core contracts, modules, and policies.",
+            heroTitle: "Network addresses for public Enten systems.",
+            heroSummary:
+              "Track stable deployment addresses by network for core contracts, policies, modules, and related system components."
+          },
+          "integration-notes": {
+            title: "System Integration",
+            section: "DOCS_08 // DEVELOPERS",
+            path: "./docs/integration-notes.md",
+            group: "developers",
+            summary: "How teams and developers should think about integrating with Enten contracts.",
+            heroTitle: "Integration rules for contract-backed workflows.",
+            heroSummary:
+              "Start from contract boundaries, approved spenders, asset movement, and invariants before building user-facing actions."
+          },
+          "launching-your-own-token": {
+            title: "Launching Your Own Token",
+            section: "DOCS_09 // LAUNCHES",
+            path: "./docs/launching-your-own-token.md",
+            group: "launches",
+            summary: "Frontend launch flow, core deployment, backing setup, module activation, and governance setup.",
+            heroTitle: "Launch a complete token system from day one.",
+            heroSummary:
+              "Walk through token creation, controller setup, backing choices, mint permissions, governance routing, and launch-time operational checks."
+          },
+          "enten-built-modules-and-policies": {
+            title: "Enten Built Modules and Policies",
+            section: "DOCS_10 // MODULES",
+            path: "./docs/enten-built-modules-and-policies.md",
+            group: "launches",
+            summary: "Built-in Enten modules, policy pairings, and the capabilities they expose to launched systems.",
+            heroTitle: "Built-in modules and policies for launched systems.",
+            heroSummary:
+              "Review the native capability set that teams can activate, compose, or replace as their protocol evolves."
+          },
+          "architecture": {
+            title: "Architecture",
+            section: "DOCS_11 // ARCHITECTURE",
+            path: "./docs/architecture.md",
+            group: "developers",
+            summary: "The four core contracts, how state and funds are organized, and how settlement validates state changes.",
+            heroTitle: "The developer's mental model of an Enten system.",
+            heroSummary:
+              "How the four core contracts hold state and funds, and how the settlement engine turns capability requests into validated state changes."
+          },
+          "building-modules-and-policies": {
+            title: "Building Modules & Policies",
+            section: "DOCS_12 // BUILDING",
+            path: "./docs/building-modules-and-policies.md",
+            group: "developers",
+            summary: "Writing modules and policies: the two roles, installation, permissioning, and safe composition with the core.",
+            heroTitle: "Extend a system by writing modules and policies.",
+            heroSummary:
+              "The two roles, how they're installed and permissioned, and the patterns that keep a new capability composing safely with the core."
+          },
+          "borrowing-and-redemption": {
+            title: "Borrowing & Redemption",
+            section: "DOCS_13 // BORROWING",
+            path: "./docs/borrowing-and-redemption.md",
+            group: "mechanics",
+            summary: "Borrowing against tokens, redeeming for backing, and supply-burning mechanisms that raise backing per token.",
+            heroTitle: "Borrow against backing and redeem for your share.",
+            heroSummary:
+              "How holders borrow against their tokens, redeem them for backing, and benefit from mechanisms that burn supply to raise everyone's backing per token."
+          },
+          "treasury-and-liquidity": {
+            title: "Treasury & Liquidity",
+            section: "DOCS_14 // TREASURY",
+            path: "./docs/treasury-and-liquidity.md",
+            group: "mechanics",
+            summary: "How the protocol-controlled treasury operates and how systems build protocol-owned liquidity.",
+            heroTitle: "Putting protocol-owned assets to work.",
+            heroSummary:
+              "How the treasury operates as a pool separate from backing, and how Enten systems build protocol-owned liquidity."
+          },
+          "glossary": {
+            title: "Glossary",
+            section: "DOCS_15 // GLOSSARY",
+            path: "./docs/glossary.md",
+            group: "introduction",
+            summary: "Key terms used throughout the Enten documentation.",
+            heroTitle: "Key terms across the Enten documentation.",
+            heroSummary:
+              "Definitions for the concepts, contracts, and mechanisms referenced throughout these docs."
+          }
+        };
+
+        var article = document.getElementById("doc-article");
+        var toc = document.getElementById("doc-toc-links");
+        var sourceLabel = document.querySelector("[data-doc-source]");
+        var sectionLabel = document.querySelector("[data-doc-section]");
+        var heroSection = document.querySelector("[data-doc-hero-section]");
+        var heroTitle = document.querySelector("[data-doc-hero-title]");
+        var heroSummary = document.querySelector("[data-doc-hero-summary]");
+        var searchOverlay = document.querySelector("[data-search-overlay]");
+        var searchInput = document.querySelector("[data-search-input]");
+        var searchResults = document.querySelector("[data-search-results]");
+
+        function $(selector, root) {
+          return (root || document).querySelector(selector);
+        }
+
+        function $all(selector, root) {
+          return Array.prototype.slice.call((root || document).querySelectorAll(selector));
+        }
+
+        function escapeHtml(value) {
+          return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+        }
+
+        function slugify(value) {
+          return String(value)
+            .toLowerCase()
+            .replace(/`/g, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+        }
+
+        function parseInline(value) {
+          var codeTokens = [];
+          var text = String(value).replace(/`([^`]+)`/g, function (_, code) {
+            var token = "\u0000CODE" + codeTokens.length + "\u0000";
+            codeTokens.push("<code>" + escapeHtml(code) + "</code>");
+            return token;
+          });
+
+          text = escapeHtml(text)
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, label, href) {
+              var mdMatch = href.match(/^\.?\/?(?:docs\/)?([a-z0-9-]+)\.md(?:#[^)]*)?$/i);
+              if (mdMatch) {
+                var docId = mdMatch[1].toLowerCase();
+                return (
+                  '<a class="doc-xref" href="#' +
+                  escapeHtml(docId) +
+                  '" data-doc-link="' +
+                  escapeHtml(docId) +
+                  '">' +
+                  label +
+                  "</a>"
+                );
+              }
+              if (/^https?:/i.test(href)) {
+                return '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener">' + label + "</a>";
+              }
+              return '<a href="' + escapeHtml(href) + '">' + label + "</a>";
+            })
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+
+          codeTokens.forEach(function (html, index) {
+            text = text.replace("\u0000CODE" + index + "\u0000", html);
+          });
+
+          return text;
+        }
+
+        function renderMarkdown(markdown) {
+          var lines = markdown.replace(/\r\n/g, "\n").split("\n");
+          var html = [];
+          var paragraph = [];
+          var listType = null;
+          var inCode = false;
+          var codeLang = "";
+          var codeLines = [];
+          var tableLines = [];
+
+          function flushParagraph() {
+            if (!paragraph.length) return;
+            html.push("<p>" + parseInline(paragraph.join(" ")) + "</p>");
+            paragraph = [];
+          }
+
+          function closeList() {
+            if (!listType) return;
+            html.push("</" + listType + ">");
+            listType = null;
+          }
+
+          function openList(type) {
+            if (listType === type) return;
+            closeList();
+            html.push("<" + type + ">");
+            listType = type;
+          }
+
+          function flushTable() {
+            if (!tableLines.length) return;
+            var rows = tableLines;
+            tableLines = [];
+
+            function cells(line) {
+              return line
+                .trim()
+                .replace(/^\|/, "")
+                .replace(/\|$/, "")
+                .split("|")
+                .map(function (cell) {
+                  return cell.trim();
+                });
+            }
+
+            // A real GFM table has a separator row (---|---) as its second line.
+            // Without it, emit the lines as plain paragraphs rather than a table.
+            var hasSeparator =
+              rows.length > 1 && rows[1].indexOf("-") !== -1 && /^[\s:|-]+$/.test(rows[1]);
+
+            if (!hasSeparator) {
+              rows.forEach(function (row) {
+                html.push("<p>" + parseInline(row.trim()) + "</p>");
+              });
+              return;
+            }
+
+            var out = "<table><thead><tr>";
+            cells(rows[0]).forEach(function (cell) {
+              out += "<th>" + parseInline(cell) + "</th>";
+            });
+            out += "</tr></thead><tbody>";
+            rows.slice(2).forEach(function (row) {
+              out += "<tr>";
+              cells(row).forEach(function (cell) {
+                out += "<td>" + parseInline(cell) + "</td>";
+              });
+              out += "</tr>";
+            });
+            out += "</tbody></table>";
+            html.push(out);
+          }
+
+          lines.forEach(function (line) {
+            var fence = line.match(/^```([a-zA-Z0-9_-]*)\s*$/);
+            if (fence) {
+              if (inCode) {
+                html.push(
+                  '<pre><code class="language-' +
+                    escapeHtml(codeLang) +
+                    '">' +
+                    escapeHtml(codeLines.join("\n")) +
+                    "</code></pre>"
+                );
+                inCode = false;
+                codeLang = "";
+                codeLines = [];
+              } else {
+                flushParagraph();
+                closeList();
+                flushTable();
+                inCode = true;
+                codeLang = fence[1] || "";
+              }
+              return;
+            }
+
+            if (inCode) {
+              codeLines.push(line);
+              return;
+            }
+
+            var tableRow = line.match(/^\s*\|.*\|\s*$/);
+            if (tableLines.length && !tableRow) {
+              flushTable();
+            }
+            if (tableRow) {
+              flushParagraph();
+              closeList();
+              tableLines.push(line);
+              return;
+            }
+
+            if (!line.trim()) {
+              flushParagraph();
+              closeList();
+              return;
+            }
+
+            var heading = line.match(/^(#{1,3})\s+(.+)$/);
+            if (heading) {
+              flushParagraph();
+              closeList();
+              var level = heading[1].length;
+              var raw = heading[2].trim();
+              var id = slugify(raw);
+              html.push("<h" + level + ' id="' + id + '">' + parseInline(raw) + "</h" + level + ">");
+              return;
+            }
+
+            var quote = line.match(/^>\s+(.+)$/);
+            if (quote) {
+              flushParagraph();
+              closeList();
+              html.push("<blockquote><p>" + parseInline(quote[1]) + "</p></blockquote>");
+              return;
+            }
+
+            var unordered = line.match(/^\s*[-*]\s+(.+)$/);
+            if (unordered) {
+              flushParagraph();
+              openList("ul");
+              html.push("<li>" + parseInline(unordered[1]) + "</li>");
+              return;
+            }
+
+            var ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+            if (ordered) {
+              flushParagraph();
+              openList("ol");
+              html.push("<li>" + parseInline(ordered[1]) + "</li>");
+              return;
+            }
+
+            paragraph.push(line.trim());
+          });
+
+          if (inCode) {
+            html.push(
+              '<pre><code class="language-' +
+                escapeHtml(codeLang) +
+                '">' +
+                escapeHtml(codeLines.join("\n")) +
+                "</code></pre>"
+            );
+          }
+          flushParagraph();
+          closeList();
+          flushTable();
+
+          return html.join("");
+        }
+
+        var activeDocId = "overview";
+
+        function docIdFromHash() {
+          var id = window.location.hash.replace(/^#/, "");
+          return docs[id] ? id : "overview";
+        }
+
+        function setActiveDoc(id) {
+          var activeGroup = docs[id] && docs[id].group;
+
+          $all("[data-doc-link]").forEach(function (link) {
+            var isActive = link.getAttribute("data-doc-link") === id;
+            if (isActive) {
+              link.setAttribute("aria-current", "page");
+            } else {
+              link.removeAttribute("aria-current");
+            }
+          });
+
+          $all("[data-doc-group]").forEach(function (section) {
+            var title = $(".sidebar-title", section);
+            var isActive = section.getAttribute("data-doc-group") === activeGroup;
+            if (!title) return;
+            title.classList.toggle("is-active", isActive);
+          });
+        }
+
+        function buildToc() {
+          var headings = $all("h2, h3", article);
+          toc.innerHTML = "";
+          if (!headings.length) {
+            toc.innerHTML = '<a class="toc-link" href="#reader">Overview</a>';
+            return;
+          }
+
+          headings.forEach(function (heading) {
+            var link = document.createElement("a");
+            link.className = "toc-link";
+            if (heading.tagName === "H3") link.className += " toc-link--sub";
+            link.href = "#" + heading.id;
+            link.textContent = heading.textContent;
+            toc.appendChild(link);
+          });
+        }
+
+        function updateDocHero(doc) {
+          if (heroSection) heroSection.textContent = doc.section;
+          if (heroTitle) heroTitle.textContent = doc.heroTitle || doc.title;
+          if (heroSummary) heroSummary.textContent = doc.heroSummary || doc.summary;
+        }
+
+        async function loadDoc(id) {
+          var doc = docs[id] || docs.overview;
+          activeDocId = docs[id] ? id : "overview";
+          setActiveDoc(activeDocId);
+          updateDocHero(doc);
+          sectionLabel.textContent = doc.section;
+          sourceLabel.textContent = doc.path.replace("./", "web/");
+          article.innerHTML = "<h1>Loading " + escapeHtml(doc.title) + ".</h1>";
+
+          try {
+            var response = await fetch(doc.path, { cache: "no-store" });
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            var markdown = await response.text();
+            article.innerHTML = renderMarkdown(markdown);
+          } catch (error) {
+            article.innerHTML =
+              "<h1>" +
+              escapeHtml(doc.title) +
+              "</h1><p>This document could not be loaded. Check that " +
+              escapeHtml(doc.path) +
+              " is present in the static asset directory.</p>";
+          }
+
+          buildToc();
+        }
+
+        function renderSearchResults(query) {
+          var normalized = String(query || "").toLowerCase().trim();
+          var ids = Object.keys(docs).filter(function (id) {
+            var doc = docs[id];
+            return (
+              !normalized ||
+              doc.title.toLowerCase().indexOf(normalized) !== -1 ||
+              doc.summary.toLowerCase().indexOf(normalized) !== -1 ||
+              doc.section.toLowerCase().indexOf(normalized) !== -1
+            );
+          });
+
+          searchResults.innerHTML = "";
+          ids.forEach(function (id) {
+            var doc = docs[id];
+            var button = document.createElement("button");
+            button.className = "search-result";
+            button.type = "button";
+            button.innerHTML = "<strong>" + escapeHtml(doc.title) + "</strong><span>" + escapeHtml(doc.summary) + "</span>";
+            button.addEventListener("click", function () {
+              closeSearch();
+              window.location.hash = id;
+              loadDoc(id);
+            });
+            searchResults.appendChild(button);
+          });
+        }
+
+        function openSearch() {
+          searchOverlay.setAttribute("data-open", "true");
+          searchOverlay.setAttribute("aria-hidden", "false");
+          renderSearchResults(searchInput.value);
+          window.setTimeout(function () {
+            searchInput.focus();
+          }, 0);
+        }
+
+        function closeSearch() {
+          searchOverlay.removeAttribute("data-open");
+          searchOverlay.setAttribute("aria-hidden", "true");
+        }
+
+        document.addEventListener("mousemove", function (event) {
+          window.requestAnimationFrame(function () {
+            $("#ch-h").style.top = event.clientY + "px";
+            $("#ch-v").style.left = event.clientX + "px";
+          });
+        });
+
+        $all("[data-doc-link]").forEach(function (link) {
+          link.addEventListener("click", function () {
+            var id = link.getAttribute("data-doc-link");
+            if (!docs[id]) return;
+            window.location.hash = id;
+            loadDoc(id);
+          });
+        });
+
+        // Cross-references rendered inside the article are created dynamically,
+        // so bind them through delegation instead of at load time.
+        article.addEventListener("click", function (event) {
+          var target = event.target;
+          var link = target && target.closest ? target.closest("a[data-doc-link]") : null;
+          if (!link) return;
+          var id = link.getAttribute("data-doc-link");
+          if (!docs[id]) return;
+          event.preventDefault();
+          window.location.hash = id;
+          loadDoc(id);
+          var reader = document.getElementById("reader");
+          if (reader) reader.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+
+        $("[data-search-toggle]").addEventListener("click", openSearch);
+        $("[data-search-close]").addEventListener("click", closeSearch);
+        searchInput.addEventListener("input", function () {
+          renderSearchResults(searchInput.value);
+        });
+
+        searchOverlay.addEventListener("click", function (event) {
+          if (event.target === searchOverlay) closeSearch();
+        });
+
+        document.addEventListener("keydown", function (event) {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+            event.preventDefault();
+            openSearch();
+          }
+          if (event.key === "Escape") closeSearch();
+        });
+
+        window.addEventListener("hashchange", function () {
+          var id = window.location.hash.replace(/^#/, "");
+          if (docs[id] && id !== activeDocId) {
+            loadDoc(id);
+          }
+        });
+
+        loadDoc(docIdFromHash());
+      })();
+    </script>
+  </body>
+</html>
