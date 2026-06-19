@@ -2,11 +2,14 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  encodeAbiParameters,
   encodeFunctionData,
   formatUnits as viemFormatUnits,
   http,
+  keccak256,
   parseAbi,
-  parseUnits as viemParseUnits
+  parseUnits as viemParseUnits,
+  stringToHex
 } from "./viem-runtime.js";
 
 (function () {
@@ -112,12 +115,17 @@ import {
       },
       presale: {
         address: "0x1c54Fd960b761960A4265AE49603a338995e19e6",
+        controllerAddress: "0x6cd36ee52e83f88201b97914a8f574b922b69360",
+        kernelAddress: "0x198ce3da5a8f9cd79c474887a7318ca42919e687",
+        assetId: "MEGA",
         mintDecimals: 18,
         deadlineSeconds: 1200,
         maxPaymentBufferBps: 0
       },
       borrow: {
         address: "0x1c86024bE1F892A17C995c002564BA865612eCaE",
+        controllerAddress: "0x6cd36ee52e83f88201b97914a8f574b922b69360",
+        kernelAddress: "0x198ce3da5a8f9cd79c474887a7318ca42919e687",
         assetId: "MEGA"
       },
       kumbaya: {
@@ -222,6 +230,7 @@ import {
 
   var ERC20_ABI = parseAbi([
     "function balanceOf(address owner) view returns (uint256)",
+    "function totalSupply() view returns (uint256)",
     "function allowance(address owner, address spender) view returns (uint256)",
     "function approve(address spender, uint256 amount) returns (bool)"
   ]);
@@ -265,11 +274,21 @@ import {
 
   var VAULT_ABI = parseAbi(["function backingBalances() view returns ((address token, uint256 amount)[])"]);
   var CONTROLLER_VIEW_ABI = parseAbi(["function VAULT() view returns (address)"]);
+  var KERNEL_VIEW_ABI = parseAbi(["function viewData(bytes32[] slots) view returns (bytes32[])"]);
+
+  // Kernel namespaces used by the protocol's backingPerToken helper. The two
+  // asset-specific values are stored at keccak256(abi.encode(namespace, asset)).
+  var BACKING_AMOUNT_SLOT = keccak256(stringToHex("enten.vault.backing.amount"));
+  var ASSET_TOTAL_BORROWED_SLOT = keccak256(stringToHex("enten.borrow.asset.borrowed"));
+  var TEAM_LOCKED_TOKENS_SLOT = keccak256(stringToHex("enten.team.locked.tokens"));
+  var WAD = 10n ** 18n;
 
   // BorrowPolicy (enten-periphery). Collateralized, interest-free borrowing of backing
   // assets against deposited ENTEN. `Receipt` is the {asset, amount} tuple used across
   // borrow/repay; `userPosition` returns the caller's collateral and per-asset debt.
   var BORROW_POLICY_ABI = parseAbi([
+    "function CONTROLLER() view returns (address)",
+    "function KERNEL() view returns (address)",
     "function TOKEN() view returns (address)",
     "function isActive() view returns (bool)",
     "function deposit(uint256 amount)",
@@ -394,6 +413,7 @@ import {
     minBid: null,
     price: null,
     minPrice: null,
+    backingPerToken: null,
     assetAddress: "",
     assetUsdPrice: null,
     vaultAddress: "",
@@ -411,10 +431,13 @@ import {
     debt: null,
     available: null,
     entenBalance: null,
+    backingPerToken: null,
+    availableWithWallet: null,
     assetAddress: "",
     assetSymbol: "MEGA",
     assetDecimals: 18,
     collateralDecimals: 18,
+    kernelAddress: "",
     vaultAddress: "",
     chainId: ""
   };
@@ -1349,6 +1372,20 @@ import {
     return isAddress(configured) ? configured : "";
   }
 
+  function presaleKernelAddress(chain) {
+    return chain && chain.presale && isAddress(chain.presale.kernelAddress) ? chain.presale.kernelAddress : "";
+  }
+
+  function presaleBackingAssetConfig(chain) {
+    var wantedId = chain && chain.presale && chain.presale.assetId ? chain.presale.assetId : "MEGA";
+    var quotes = chain && chain.tokens && Array.isArray(chain.tokens.quotes) ? chain.tokens.quotes : [];
+    return (
+      quotes.find(function (token) {
+        return token && (token.id === wantedId || token.symbol === wantedId);
+      }) || null
+    );
+  }
+
   function chainWithConfiguredPresale() {
     var preferred = supportedChain(preferredChainId());
 
@@ -1403,6 +1440,14 @@ import {
 
   function borrowAddress(chain) {
     return chain && chain.borrow && isAddress(chain.borrow.address) ? chain.borrow.address : "";
+  }
+
+  function borrowControllerAddress(chain) {
+    return chain && chain.borrow && isAddress(chain.borrow.controllerAddress) ? chain.borrow.controllerAddress : "";
+  }
+
+  function borrowKernelAddress(chain) {
+    return chain && chain.borrow && isAddress(chain.borrow.kernelAddress) ? chain.borrow.kernelAddress : "";
   }
 
   // The borrowable asset surfaced by the page (MEGA). Resolved from the chain's quote
@@ -2532,21 +2577,26 @@ import {
     var assetAddress = presaleUiState.assetAddress;
     var hasAsset = isAddress(assetAddress);
     var minPrice = presaleUiState.minPrice;
+    var backingPerToken = presaleUiState.backingPerToken;
     var raised = presaleUiState.totalCommitted;
     var display;
 
-    // Backing per ENTEN (minimumPrice) — drives both the floor line next to the
-    // current price and the bottom stat card. This is the backing value, not the
-    // live Dutch-auction price.
+    // minimumPrice() is the grossed-up sale floor. It is intentionally higher
+    // than backing per token so the backing share of the payment preserves NAV.
     if (hasAsset && minPrice !== null && minPrice !== undefined) {
       display = assetDisplay(chain, { address: assetAddress, amount: minPrice }, 6);
       setText("[data-presale-min-price]", display.value);
       setText("[data-presale-min-price-unit]", display.unit + " / ENTEN");
-      setText("[data-presale-backing]", display.value);
-      setText("[data-presale-backing-unit]", display.unit + " / ENTEN");
     } else {
       setText("[data-presale-min-price]", "--");
       setText("[data-presale-min-price-unit]", "");
+    }
+
+    if (hasAsset && backingPerToken !== null && backingPerToken !== undefined) {
+      display = assetDisplay(chain, { address: assetAddress, amount: backingPerToken }, 6);
+      setText("[data-presale-backing]", display.value);
+      setText("[data-presale-backing-unit]", display.unit + " / ENTEN");
+    } else {
       setText("[data-presale-backing]", "--");
       setText("[data-presale-backing-unit]", "");
     }
@@ -3956,6 +4006,9 @@ import {
   async function loadPresaleData() {
     var chain = activePresaleChainConfig();
     var address = presaleAddress(chain);
+    var enten = chain && chain.tokens ? chain.tokens.enten : null;
+    var backingAsset = presaleBackingAssetConfig(chain);
+    var kernelAddress = presaleKernelAddress(chain);
     var client;
     var calls;
     var results = {};
@@ -3975,6 +4028,7 @@ import {
       presaleUiState.minBid = null;
       presaleUiState.price = null;
       presaleUiState.minPrice = null;
+      presaleUiState.backingPerToken = null;
       presaleUiState.assetAddress = "";
       presaleUiState.assetUsdPrice = null;
       presaleUiState.vaultAddress = "";
@@ -4017,6 +4071,23 @@ import {
       { key: "virtualReserve", address: address, abi: PRESALE_AUCTION_ABI, functionName: "VIRTUAL_TOKEN_RESERVE" }
     ];
 
+    if (
+      enten &&
+      isAddress(enten.address) &&
+      backingAsset &&
+      isAddress(backingAsset.address) &&
+      isAddress(kernelAddress)
+    ) {
+      calls.push({ key: "totalSupply", address: enten.address, abi: ERC20_ABI, functionName: "totalSupply" });
+      calls.push({
+        key: "backingState",
+        address: kernelAddress,
+        abi: KERNEL_VIEW_ABI,
+        functionName: "viewData",
+        args: [backingStateSlots(backingAsset.address)]
+      });
+    }
+
     client = publicClientForChain(chain);
 
     try {
@@ -4026,7 +4097,8 @@ import {
           return {
             address: call.address,
             abi: call.abi,
-            functionName: call.functionName
+            functionName: call.functionName,
+            args: call.args
           };
         })
       });
@@ -4040,7 +4112,8 @@ import {
             results[call.key] = await client.readContract({
               address: call.address,
               abi: call.abi,
-              functionName: call.functionName
+              functionName: call.functionName,
+              args: call.args
             });
           } catch (innerError) {
             results[call.key] = null;
@@ -4074,6 +4147,12 @@ import {
     presaleUiState.minBid = results.minBid !== null && results.minBid !== undefined ? BigInt(results.minBid) : null;
     presaleUiState.price = results.price !== null && results.price !== undefined ? BigInt(results.price) : null;
     presaleUiState.minPrice = results.minimumPrice !== null && results.minimumPrice !== undefined ? BigInt(results.minimumPrice) : null;
+    presaleUiState.backingPerToken =
+      backingAsset &&
+      isAddress(backingAsset.address) &&
+      presaleUiState.assetAddress.toLowerCase() === backingAsset.address.toLowerCase()
+        ? backingPerTokenFromState(results.backingState, results.totalSupply)
+        : null;
     presaleUiState.virtualReserve = results.virtualReserve !== null && results.virtualReserve !== undefined ? BigInt(results.virtualReserve) : null;
     presaleUiState.mintDecimals = presaleMintDecimals(chain);
     presaleUiState.chainId = chain.chainId;
@@ -5104,6 +5183,70 @@ import {
       .filter(Boolean);
   }
 
+  function kernelAssetSlot(namespace, asset) {
+    return keccak256(
+      encodeAbiParameters(
+        [{ type: "bytes32" }, { type: "address" }],
+        [namespace, asset]
+      )
+    );
+  }
+
+  function backingStateSlots(asset) {
+    return [
+      kernelAssetSlot(BACKING_AMOUNT_SLOT, asset),
+      kernelAssetSlot(ASSET_TOTAL_BORROWED_SLOT, asset),
+      TEAM_LOCKED_TOKENS_SLOT
+    ];
+  }
+
+  function backingPerTokenFromState(backingState, totalSupply) {
+    if (!Array.isArray(backingState) || backingState.length !== 3 || totalSupply === null || totalSupply === undefined) {
+      return null;
+    }
+
+    var redeemBacking = BigInt(backingState[0]);
+    var borrowedBacking = BigInt(backingState[1]);
+    var teamLocked = BigInt(backingState[2]);
+    var supply = BigInt(totalSupply);
+    var effectiveSupply = supply > teamLocked ? supply - teamLocked : 0n;
+
+    return effectiveSupply > 0n ? ((redeemBacking + borrowedBacking) * WAD) / effectiveSupply : null;
+  }
+
+  // Mirrors BorrowPolicy's Math.mulDiv position check using bigint arithmetic.
+  // Using the combined collateral amount preserves the contract's exact rounding.
+  function borrowCapacityForAdditionalCollateral(additionalCollateral) {
+    var additional = BigInt(additionalCollateral || 0);
+    var grossLimit;
+
+    if (
+      borrowUiState.backingPerToken === null ||
+      borrowUiState.collateral === null ||
+      borrowUiState.debt === null
+    ) {
+      return borrowUiState.available;
+    }
+
+    grossLimit = ((borrowUiState.collateral + additional) * borrowUiState.backingPerToken) / WAD;
+    return grossLimit > borrowUiState.debt ? grossLimit - borrowUiState.debt : 0n;
+  }
+
+  function updateBorrowCapacityPreview() {
+    var collateralInput = $("[data-borrow-collateral-input]");
+    var borrowInput = $("[data-borrow-amount]");
+    var collateralAmount = parseUnits(collateralInput ? collateralInput.value : "", borrowUiState.collateralDecimals);
+    var capacity = borrowCapacityForAdditionalCollateral(collateralAmount);
+
+    setText(
+      "[data-borrow-limit]",
+      (capacity !== null ? formatUnits(capacity, borrowUiState.assetDecimals, 4) : "0.00") + " " + borrowUiState.assetSymbol
+    );
+    if (borrowInput) {
+      borrowInput.dataset.available = capacity !== null ? formatUnitsForInput(capacity, borrowUiState.assetDecimals) : "0";
+    }
+  }
+
   // Submit button label tracks what the current inputs will do (deposit, borrow, or both).
   function updateBorrowSubmitLabel() {
     var submit = $("[data-borrow-submit]");
@@ -5145,6 +5288,8 @@ import {
     setText("[data-borrow-collateral]", "0.00");
     setText("[data-borrow-debt]", "0.00");
     setText("[data-borrow-available]", "0.00");
+    setText("[data-borrow-wallet-capacity]", "0.00");
+    setText("[data-borrow-backing-per-token]", "0.00");
     setText("[data-borrow-collateral-amount]", "0.00");
     setText("[data-borrow-enten-balance]", "0.00 ENTEN");
     setText("[data-borrow-limit]", "0.00 " + borrowUiState.assetSymbol);
@@ -5165,15 +5310,19 @@ import {
     var calls;
     var results = {};
 
-    // The controller/vault is immutable per borrow market, so drop the cached spender
-    // when the active chain changes.
-    if (borrowUiState.chainId !== (chain ? chain.chainId : "")) borrowUiState.vaultAddress = "";
+    // The controller/vault and kernel are immutable per borrow market, so drop cached
+    // addresses when the active chain changes.
+    if (borrowUiState.chainId !== (chain ? chain.chainId : "")) {
+      borrowUiState.vaultAddress = "";
+      borrowUiState.kernelAddress = "";
+    }
 
     borrowUiState.chainId = chain ? chain.chainId : "";
     borrowUiState.assetSymbol = asset ? asset.symbol : "MEGA";
     borrowUiState.assetAddress = asset && isAddress(asset.address) ? asset.address : "";
     borrowUiState.assetDecimals = asset ? asset.decimals : 18;
     borrowUiState.collateralDecimals = enten ? enten.decimals : 18;
+    borrowUiState.kernelAddress = borrowKernelAddress(chain) || borrowUiState.kernelAddress;
 
     if (!chain || !address) {
       borrowUiState.isActive = false;
@@ -5181,6 +5330,8 @@ import {
       borrowUiState.debt = null;
       borrowUiState.available = null;
       borrowUiState.entenBalance = null;
+      borrowUiState.backingPerToken = null;
+      borrowUiState.availableWithWallet = null;
       resetBorrowMetrics();
       if (borrowInput) borrowInput.dataset.available = "0";
       if (collateralInput) collateralInput.dataset.available = "0";
@@ -5205,12 +5356,36 @@ import {
 
     client = publicClientForChain(chain);
 
+    // Configured deployments take the single-multicall path. The fallback keeps the
+    // page portable if a future borrow market omits its immutable Kernel from config.
+    if (account && !isAddress(borrowUiState.kernelAddress)) {
+      try {
+        borrowUiState.kernelAddress = await client.readContract({
+          address: address,
+          abi: BORROW_POLICY_ABI,
+          functionName: "KERNEL"
+        });
+      } catch (error) {
+        borrowUiState.kernelAddress = "";
+      }
+    }
+
     calls = [{ key: "active", functionName: "isActive", args: [] }];
     if (account) {
       calls.push({ key: "position", functionName: "userPosition", args: [account] });
       calls.push({ key: "available", functionName: "borrowableForAsset", args: [account, borrowUiState.assetAddress] });
       if (enten && isAddress(enten.address)) {
         calls.push({ key: "entenBalance", address: enten.address, abi: ERC20_ABI, functionName: "balanceOf", args: [account] });
+        calls.push({ key: "totalSupply", address: enten.address, abi: ERC20_ABI, functionName: "totalSupply", args: [] });
+      }
+      if (isAddress(borrowUiState.kernelAddress)) {
+        calls.push({
+          key: "backingState",
+          address: borrowUiState.kernelAddress,
+          abi: KERNEL_VIEW_ABI,
+          functionName: "viewData",
+          args: [backingStateSlots(borrowUiState.assetAddress)]
+        });
       }
     }
 
@@ -5259,26 +5434,38 @@ import {
     }
     var available = results.available !== null && results.available !== undefined ? BigInt(results.available) : null;
     var entenBalance = results.entenBalance !== null && results.entenBalance !== undefined ? BigInt(results.entenBalance) : null;
+    var totalSupply = results.totalSupply !== null && results.totalSupply !== undefined ? BigInt(results.totalSupply) : null;
+    var backingState = Array.isArray(results.backingState) ? results.backingState : null;
+    var backingPerToken = backingPerTokenFromState(backingState, totalSupply);
 
     borrowUiState.collateral = collateral;
     borrowUiState.debt = debt;
     borrowUiState.available = available;
     borrowUiState.entenBalance = entenBalance;
+    borrowUiState.backingPerToken = backingPerToken;
+    borrowUiState.availableWithWallet =
+      entenBalance !== null && backingPerToken !== null ? borrowCapacityForAdditionalCollateral(entenBalance) : null;
 
     setText("[data-borrow-collateral]", collateral !== null ? formatUnitsCompact(collateral, borrowUiState.collateralDecimals) : "0.00");
     setText("[data-borrow-collateral-amount]", collateral !== null ? formatUnitsCompact(collateral, borrowUiState.collateralDecimals) : "0.00");
     setText("[data-borrow-debt]", debt !== null ? formatUnitsCompact(debt, borrowUiState.assetDecimals) : "0.00");
     setText("[data-borrow-available]", available !== null ? formatUnitsCompact(available, borrowUiState.assetDecimals) : "0.00");
     setText(
+      "[data-borrow-wallet-capacity]",
+      borrowUiState.availableWithWallet !== null
+        ? formatUnitsCompact(borrowUiState.availableWithWallet, borrowUiState.assetDecimals)
+        : "0.00"
+    );
+    setText(
+      "[data-borrow-backing-per-token]",
+      backingPerToken !== null ? formatUnits(backingPerToken, borrowUiState.assetDecimals, 6) : "0.00"
+    );
+    setText(
       "[data-borrow-enten-balance]",
       (entenBalance !== null ? formatUnits(entenBalance, borrowUiState.collateralDecimals, 4) : "0.00") + " ENTEN"
     );
-    setText(
-      "[data-borrow-limit]",
-      (available !== null ? formatUnits(available, borrowUiState.assetDecimals, 4) : "0.00") + " " + borrowUiState.assetSymbol
-    );
-    if (borrowInput) borrowInput.dataset.available = available !== null ? formatUnitsForInput(available, borrowUiState.assetDecimals) : "0";
     if (collateralInput) collateralInput.dataset.available = entenBalance !== null ? formatUnitsForInput(entenBalance, borrowUiState.collateralDecimals) : "0";
+    updateBorrowCapacityPreview();
 
     setBorrowFormActive(borrowUiState.isActive);
 
@@ -5326,11 +5513,14 @@ import {
     }
 
     var client = publicClientForChain(chain);
-    var controller = await client.readContract({
-      address: borrowAddress(chain),
-      abi: BORROW_POLICY_ABI,
-      functionName: "CONTROLLER"
-    });
+    var controller = borrowControllerAddress(chain);
+    if (!isAddress(controller)) {
+      controller = await client.readContract({
+        address: borrowAddress(chain),
+        abi: BORROW_POLICY_ABI,
+        functionName: "CONTROLLER"
+      });
+    }
     if (!isAddress(controller)) throw new Error("Could not resolve the borrow controller.");
 
     var vault = await client.readContract({
@@ -5484,11 +5674,13 @@ import {
       return;
     }
 
-    // A collateral deposit raises the borrow limit in the same tx, so only enforce the
-    // current limit when borrowing without depositing.
-    if (collateralAmount <= 0n && borrowAmount > 0n && borrowUiState.available !== null && borrowAmount > borrowUiState.available) {
-      setStatus("[data-page-status]", "Borrow exceeds your available limit. Use Max or enter a smaller amount.", "warn");
-      return;
+    if (borrowAmount > 0n) {
+      var previewCapacity = borrowCapacityForAdditionalCollateral(collateralAmount);
+      var canValidateCapacity = collateralAmount <= 0n || borrowUiState.backingPerToken !== null;
+      if (canValidateCapacity && previewCapacity !== null && borrowAmount > previewCapacity) {
+        setStatus("[data-page-status]", "Borrow exceeds the capacity provided by this deposit.", "warn");
+        return;
+      }
     }
 
     actionTx = buildBorrowActionTx(address, asset, collateralAmount, borrowAmount);
@@ -5612,6 +5804,7 @@ import {
         var amount = Number(input.value);
         var isValid = Number.isFinite(amount) && amount > 0;
         input.setAttribute("aria-invalid", isValid || !input.value ? "false" : "true");
+        if (input === collateralInput) updateBorrowCapacityPreview();
         updateBorrowSubmitLabel();
       });
     }

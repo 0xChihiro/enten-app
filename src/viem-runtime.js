@@ -2,9 +2,12 @@ export {
   createPublicClient,
   createWalletClient,
   custom,
+  encodeAbiParameters,
   encodeFunctionData,
   formatUnits,
   http,
+  keccak256,
   parseAbi,
-  parseUnits
+  parseUnits,
+  stringToHex
 } from "viem";
