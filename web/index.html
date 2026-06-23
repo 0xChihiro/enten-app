@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Enten | Build Above The Noise</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enten | Terminal // Home</title>
+
     <meta name="theme-color" content="#0c0d12">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,642 +13,411 @@
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
     <script src="./pwa.js" defer></script>
 
-    <link rel="preload" href="./fonts/playfair-display-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="./styles.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" async></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@100;300;400;500&family=Playfair+Display:ital,wght@0,400;0,500;1,400;1,600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              base: '#0C0D12',
+              cloud: '#F4F4F2',
+              'cloud-muted': 'rgba(244, 244, 242, 0.6)',
+              'cloud-faint': 'rgba(244, 244, 242, 0.1)',
+              'cloud-hairline': 'rgba(244, 244, 242, 0.05)',
+              gold: '#EFA143',
+              teal: '#4CB2A8',
+              navy: '#0C0D12',
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+              display: ['Playfair Display', 'serif'],
+            },
+            animation: {
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'float-1': 'float 15s ease-in-out infinite',
+              'float-2': 'float 20s ease-in-out infinite reverse',
+              'float-3': 'float 12s ease-in-out infinite 2s',
+              'aurora': 'aurora 20s ease infinite',
+            },
+            keyframes: {
+              float: {
+                '0%, 100%': { transform: 'translateY(0) translateX(0)' },
+                '33%': { transform: 'translateY(-20px) translateX(10px)' },
+                '66%': { transform: 'translateY(10px) translateX(-20px)' },
+              },
+              aurora: {
+                '0%': { backgroundPosition: '0% 50%' },
+                '50%': { backgroundPosition: '100% 50%' },
+                '100%': { backgroundPosition: '0% 50%' },
+              }
+            }
+          }
+        }
+      }
+    </script>
 
     <style>
-      :root {
-        --c-navy: #172439;
-        --c-indigo: #262b45;
-        --c-plum: #3d2938;
-        --c-base: #0c0d12;
-        --c-cloud-white: #f4f4f2;
-        --c-cloud-muted: rgba(244, 244, 242, 0.66);
-        --c-cloud-faint: rgba(244, 244, 242, 0.22);
-        --c-gold: #efa143;
-        --c-teal: #4cb2a8;
-        --font-display: "Playfair Display", Georgia, "Times New Roman", serif;
-        --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        --layout-pad: clamp(24px, 6vw, 96px);
-        --section-pad: clamp(88px, 14vh, 180px);
-        --ease-float: cubic-bezier(0.2, 0.8, 0.2, 1);
-      }
-
-      html,
       body {
-        min-height: 100%;
-      }
-
-      html {
-        scroll-behavior: smooth;
-      }
-
-      body {
-        width: 100%;
+        background-color: #0C0D12;
+        color: #F4F4F2;
         overflow-x: hidden;
-        background-color: var(--c-base);
-        color: var(--c-cloud-white);
-        cursor: crosshair;
-        font-family: var(--font-sans);
-        letter-spacing: 0;
-        -moz-osx-font-smoothing: grayscale;
         -webkit-font-smoothing: antialiased;
+        cursor: crosshair;
       }
 
-      ::selection {
-        background: var(--c-cloud-white);
-        color: var(--c-base);
-      }
-
-      #webgl-container {
-        position: fixed;
-        inset: 0;
-        z-index: -1;
-        overflow: hidden;
-        background: var(--c-base);
-        pointer-events: none;
-      }
-
-      #webgl-container canvas {
-        display: block;
-        width: 100%;
-        height: 100%;
-      }
-
-      #webgl-container.fallback-bg {
-        background: linear-gradient(180deg, #101827, #171a2a 42%, #211620 74%, var(--c-base));
-      }
-
-      h1,
-      h2,
-      h3 {
-        font-family: var(--font-display);
-        font-weight: 400;
-        letter-spacing: 0;
-        line-height: 1.05;
-      }
-
-      .t-display-xl {
-        font-size: 4rem;
-      }
-
-      .t-display-lg {
-        font-size: 3rem;
-      }
-
-      .t-display-md {
-        font-size: 2.35rem;
-      }
-
-      .t-body-lg {
-        max-width: 600px;
-        color: var(--c-cloud-muted);
-        font-size: 1.2rem;
-        font-weight: 300;
-        line-height: 1.6;
-      }
-
-      .t-body {
-        color: var(--c-cloud-muted);
-        font-size: 1rem;
-        font-weight: 300;
-        line-height: 1.6;
-      }
-
-      .t-mono {
-        color: rgba(244, 244, 242, 0.56);
-        font-family: var(--font-mono);
-        font-size: 0.75rem;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-
-      .t-mono-highlight {
-        color: var(--c-cloud-white);
-        font-weight: 400;
-      }
-
-      .sys-label {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 24px;
-      }
-
-      .sys-label::before {
-        display: block;
-        width: 12px;
-        height: 1px;
-        background: var(--c-gold);
-        content: "";
-      }
-
-      .hairline-rule {
-        width: 100%;
-        height: 1px;
-        margin: clamp(32px, 4vw, 64px) 0;
-        background: var(--c-cloud-faint);
-      }
-
-      .global-nav {
+      .bg-atmosphere-photo {
         position: fixed;
         top: 0;
-        left: 0;
-        z-index: 100;
-        display: flex;
-        width: 100%;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 28px;
-        padding: var(--layout-pad);
-        mix-blend-mode: difference;
-        transition:
-          opacity 0.6s var(--ease-float),
-          visibility 0.6s var(--ease-float);
-      }
-
-      .nav-links {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 20px clamp(22px, 3vw, 52px);
-        list-style: none;
-      }
-
-      .nav-links a {
-        position: relative;
-        color: var(--c-cloud-white);
-        font-family: var(--font-mono);
-        font-size: 0.75rem;
-        letter-spacing: 0.05em;
-      }
-
-      .nav-links a::after {
-        position: absolute;
-        bottom: -4px;
-        left: 0;
-        width: 0;
-        height: 1px;
-        background: var(--c-cloud-white);
-        content: "";
-        transition: width 0.6s var(--ease-float);
-      }
-
-      .nav-links a:hover::after,
-      .nav-links a:focus-visible::after {
-        width: 100%;
-      }
-
-      .altitude-meter {
-        position: fixed;
-        top: 50%;
-        right: clamp(24px, 3vw, 48px);
-        z-index: 10;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 8px;
-        opacity: 0.5;
-        transform: translateY(-50%);
-      }
-
-      .alt-line {
-        width: 1px;
-        height: 100px;
-        background: linear-gradient(to bottom, transparent, var(--c-cloud-white), transparent);
-      }
-
-      .container {
-        width: min(100%, 1800px);
-        margin: 0 auto;
-        padding: 0 var(--layout-pad);
-      }
-
-      section {
-        position: relative;
-        display: flex;
-        min-height: 100svh;
-        flex-direction: column;
-        justify-content: center;
-        padding: var(--section-pad) 0;
-      }
-
-      .reveal {
-        opacity: 0;
-        transform: translateY(40px);
-        transition:
-          opacity 1.4s var(--ease-float),
-          transform 1.4s var(--ease-float);
-      }
-
-      .reveal.active {
-        opacity: 1;
-        transform: translateY(0);
-      }
-
-      #hero {
-        min-height: 92svh;
-        align-items: center;
-        padding-top: clamp(130px, 20vh, 220px);
-        text-align: center;
-      }
-
-      .hero-meta {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 14px 24px;
-        margin-top: clamp(32px, 4vw, 64px);
-      }
-
-      #developers {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        align-items: end;
-        gap: clamp(56px, 10vw, 160px);
-      }
-
-      .vision-text {
-        padding-bottom: 10vh;
-      }
-
-      .data-card {
-        margin-top: clamp(32px, 4vw, 64px);
-        padding-left: clamp(24px, 3vw, 48px);
-        border-left: 1px solid var(--c-cloud-faint);
-      }
-
-      #system {
-        display: grid;
-        grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
-        gap: clamp(56px, 8vw, 128px);
-      }
-
-      .tech-panel {
-        position: relative;
-        padding: clamp(28px, 4vw, 64px);
-        border: 1px solid var(--c-cloud-faint);
-        background: rgba(244, 244, 242, 0.03);
-        backdrop-filter: blur(10px);
-      }
-
-      .tech-panel::before,
-      .tech-panel::after {
-        position: absolute;
-        color: rgba(244, 244, 242, 0.46);
-        content: "+";
-        font-family: var(--font-mono);
-        font-size: 10px;
-      }
-
-      .tech-panel::before {
-        top: 8px;
-        left: 8px;
-      }
-
-      .tech-panel::after {
-        right: 8px;
-        bottom: 8px;
-      }
-
-      .code-snippet {
-        margin-top: 24px;
-        color: var(--c-cloud-muted);
-        font-family: var(--font-mono);
-        font-size: 0.85rem;
-        line-height: 1.8;
-        overflow-wrap: anywhere;
-      }
-
-      .code-snippet span {
-        color: var(--c-teal);
-      }
-
-      .code-snippet .keyword {
-        color: var(--c-gold);
-      }
-
-      #resources {
-        min-height: 80svh;
-        justify-content: flex-end;
-        padding-bottom: var(--layout-pad);
-      }
-
-      .ecosystem-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 1px;
-        border: 1px solid var(--c-cloud-faint);
-        background: var(--c-cloud-faint);
-      }
-
-      .eco-module {
-        display: block;
-        min-height: 260px;
-        padding: clamp(28px, 4vw, 64px);
-        background: rgba(12, 13, 18, 0.92);
-        cursor: pointer;
-        transition:
-          background 0.4s var(--ease-float),
-          color 0.4s var(--ease-float);
-      }
-
-      .eco-module:hover,
-      .eco-module:focus-visible {
-        background: rgba(244, 244, 242, 0.05);
-      }
-
-      .eco-module h3 {
-        margin-bottom: 16px;
-        font-size: 1.5rem;
-      }
-
-      .footer-bottom {
-        display: flex;
-        justify-content: space-between;
-        gap: 24px;
-        margin-top: clamp(48px, 6vw, 96px);
-        padding-top: 24px;
-        border-top: 1px solid var(--c-cloud-faint);
-      }
-
-      .footer-links {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 14px 24px;
-      }
-
-      .crosshair-h,
-      .crosshair-v {
-        position: fixed;
-        z-index: 999;
-        background: rgba(244, 244, 242, 0.1);
-        pointer-events: none;
-      }
-
-      .crosshair-h {
         left: 0;
         width: 100vw;
-        height: 1px;
-      }
-
-      .crosshair-v {
-        top: 0;
-        width: 1px;
         height: 100vh;
+        background-image: url('https://images.unsplash.com/photo-1500462918059-b1a0cb512f1d?q=80&w=2560&auto=format&fit=crop');
+        background-size: cover;
+        background-position: center 30%;
+        opacity: 0.15;
+        z-index: -4;
+        pointer-events: none;
+        mix-blend-mode: screen;
+        filter: saturate(0.2) contrast(1.2);
       }
 
-      @media (min-width: 760px) {
-        .t-display-xl {
-          font-size: 6.5rem;
-        }
-
-        .t-display-lg {
-          font-size: 4.5rem;
-        }
-
-        .t-display-md {
-          font-size: 3.25rem;
-        }
+      .bg-atmosphere-gradient {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: radial-gradient(circle at 50% 30%,
+          rgba(12, 13, 18, 0.6) 0%,
+          rgba(12, 13, 18, 0.9) 60%,
+          rgba(12, 13, 18, 1) 100%);
+        z-index: -3;
+        pointer-events: none;
       }
 
-      @media (min-width: 1180px) {
-        .t-display-xl {
-          font-size: 9rem;
-        }
-
-        .t-display-lg {
-          font-size: 5.75rem;
-        }
-
-        .t-display-md {
-          font-size: 4rem;
-        }
+      .grid-bg {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background-image:
+          linear-gradient(rgba(244, 244, 242, 0.02) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(244, 244, 242, 0.02) 1px, transparent 1px);
+        background-size: 32px 32px;
+        z-index: -2;
+        pointer-events: none;
       }
 
-      @media (max-width: 1024px) {
-        .nav-links {
-          display: none;
-        }
-
-        .global-nav {
-          align-items: center;
-        }
-
-        .altitude-meter {
-          display: none;
-        }
-
-        #developers,
-        #system,
-        .ecosystem-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .vision-text {
-          padding-bottom: 0;
-        }
-
-        .tech-panel {
-          transition-delay: 0s !important;
-        }
+      .scanline {
+        width: 100%;
+        height: 1px;
+        background: rgba(76, 178, 168, 0.1);
+        position: fixed;
+        top: 0;
+        left: 0;
+        animation: scan 8s linear infinite;
+        pointer-events: none;
+        z-index: 50;
       }
 
-      @media (max-width: 640px) {
-        body {
-          cursor: auto;
-        }
-
-        .global-nav {
-          padding-top: 24px;
-        }
-
-        .t-display-xl {
-          font-size: 3.7rem;
-        }
-
-        .t-display-lg {
-          font-size: 2.65rem;
-        }
-
-        .t-body-lg {
-          font-size: 1.08rem;
-        }
-
-        .t-mono {
-          font-size: 0.68rem;
-        }
-
-        .crosshair-h,
-        .crosshair-v {
-          display: none;
-        }
-
-        .footer-bottom {
-          flex-direction: column;
-        }
-
-        .footer-links {
-          justify-content: flex-start;
-        }
+      @keyframes scan {
+        from { top: 0; }
+        to { top: 100%; }
       }
 
-      @media (prefers-reduced-motion: reduce) {
-        html {
-          scroll-behavior: auto;
-        }
-
-        .reveal,
-        .global-nav,
-        .eco-module,
-        .nav-links a::after {
-          transition: none;
-        }
+      .ticker-scroll {
+        animation: scroll 40s linear infinite;
       }
+
+      @keyframes scroll {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+      }
+
+      .particle {
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+        opacity: 0;
+        animation: drift 15s linear infinite;
+      }
+
+      @keyframes drift {
+        0% { transform: translateY(100px) scale(0); opacity: 0; }
+        20% { opacity: 0.6; }
+        80% { opacity: 0.6; }
+        100% { transform: translateY(-200px) scale(1.5); opacity: 0; }
+      }
+
+      .p-1 { left: 10%; width: 3px; height: 3px; background: #EFA143; animation-delay: 0s; animation-duration: 18s; }
+      .p-2 { left: 25%; width: 2px; height: 2px; background: #4CB2A8; animation-delay: 4s; animation-duration: 22s; }
+      .p-3 { left: 45%; width: 4px; height: 4px; background: #EFA143; animation-delay: 2s; animation-duration: 15s; }
+      .p-4 { left: 65%; width: 2px; height: 2px; background: #F4F4F2; animation-delay: 7s; animation-duration: 25s; }
+      .p-5 { left: 85%; width: 3px; height: 3px; background: #4CB2A8; animation-delay: 1s; animation-duration: 19s; }
+      .p-6 { left: 15%; width: 2px; height: 2px; background: #F4F4F2; animation-delay: 11s; animation-duration: 16s; }
+      .p-7 { left: 55%; width: 5px; height: 5px; background: #EFA143; animation-delay: 8s; animation-duration: 24s; opacity: 0.3; }
+      .p-8 { left: 75%; width: 2px; height: 2px; background: #4CB2A8; animation-delay: 14s; animation-duration: 20s; }
+
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: rgba(244, 244, 242, 0.1); }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(244, 244, 242, 0.2); }
     </style>
-    <link rel="stylesheet" href="./nav.css">
   </head>
-  <body>
-    <div id="webgl-container" aria-hidden="true"></div>
+  <body class="font-sans min-h-screen w-full relative">
 
-    <div class="crosshair-h" id="ch-h" aria-hidden="true"></div>
-    <div class="crosshair-v" id="ch-v" aria-hidden="true"></div>
+    <div class="bg-atmosphere-photo"></div>
+    <div class="bg-atmosphere-gradient"></div>
+    <div class="grid-bg"></div>
+    <div class="scanline"></div>
 
-    <header class="global-nav enten-nav-shell">
-      <a class="logo" href="#hero" aria-label="Enten home">Enten.</a>
-      <nav class="nav-menu" aria-label="Primary">
-        <ul class="nav-links">
-          <li><a href="#hero" aria-current="page">Home</a></li>
-          <li><a href="/wallet">Wallet</a></li>
-          <li class="nav-group">
-            <button class="nav-group-trigger" type="button" aria-haspopup="true">Launchpad</button>
-            <ul class="nav-dropdown">
-              <li><a href="/presale">Presale</a></li>
-              <li><a href="/launch">Launch Token</a></li>
-            </ul>
-          </li>
-          <li class="nav-group">
-            <button class="nav-group-trigger" type="button" aria-haspopup="true">Markets</button>
-            <ul class="nav-dropdown">
-              <li><a href="/auction">Auctions</a></li>
-              <li><a href="/swap">Portal</a></li>
-              <li><a href="/borrow">Borrow</a></li>
-            </ul>
-          </li>
-          <li class="nav-group">
-            <button class="nav-group-trigger" type="button" aria-haspopup="true">Protocol</button>
-            <ul class="nav-dropdown">
-              <li><a href="/docs#integration-notes">Developers</a></li>
-              <li><a href="/docs#protocol-model">System</a></li>
-              <li><a href="/docs">Documentation</a></li>
-            </ul>
-          </li>
-        </ul>
-      </nav>
-      <div class="t-mono">[ v.2.4.0 ]</div>
+    <header class="fixed top-0 left-0 w-full px-6 md:px-12 py-6 flex justify-between items-center z-[100] border-b border-cloud-hairline backdrop-blur-md bg-base/50">
+      <div class="flex items-center gap-8">
+        <a href="/" class="font-display italic text-2xl tracking-wide text-cloud">Enten.</a>
+        <div class="h-4 w-[1px] bg-cloud-faint hidden md:block"></div>
+        <div class="font-mono text-[10px] tracking-widest text-cloud-muted uppercase hidden md:block">Terminal / Home</div>
+
+        <nav class="hidden lg:flex items-center gap-8 ml-8 font-mono text-[10px] tracking-widest uppercase">
+          <a href="/" class="text-cloud hover:text-gold transition-colors">Home</a>
+          <a href="/presale" class="text-cloud-muted hover:text-cloud transition-colors">Presale</a>
+          <a href="/launch" class="text-cloud-muted hover:text-cloud transition-colors">Launch</a>
+          <a href="/borrow" class="text-cloud-muted hover:text-cloud transition-colors">Borrow</a>
+        </nav>
+      </div>
+
+      <div class="flex items-center gap-6">
+        <div class="hidden md:flex font-mono text-[10px] tracking-widest text-teal uppercase items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-teal animate-pulse"></span>
+          Network Synced
+        </div>
+        <a href="/wallet" class="px-6 py-2.5 border border-gold/40 bg-gold/5 font-mono text-[10px] tracking-[0.2em] uppercase hover:bg-gold/10 hover:border-gold/60 transition-all text-gold">
+          Connect Wallet
+        </a>
+      </div>
     </header>
 
-    <div class="altitude-meter" aria-hidden="true">
-      <div class="t-mono">ALT</div>
-      <div class="alt-line"></div>
-      <div class="t-mono t-mono-highlight" id="alt-val">84,000</div>
-    </div>
+    <main class="w-full z-10 relative flex flex-col items-center">
 
-    <main class="container">
-      <section id="hero">
-        <div class="reveal">
-          <div class="sys-label t-mono">SYS_01 // PERSPECTIVE</div>
-          <h1 class="t-display-xl">Build Above<br>The Noise.</h1>
-          <div class="hero-meta">
-            <div class="t-mono">[ LAT 45.9 // LON 12.4 ]</div>
-            <div class="t-mono">ELEVATION SECURED</div>
+      <section class="w-full min-h-[90vh] flex flex-col items-center justify-center relative overflow-hidden pt-20">
+
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[60vw] h-[60vw] max-w-[800px] max-h-[800px] bg-teal/10 blur-[120px] rounded-full animate-pulse-slow z-0"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[40vw] h-[40vw] max-w-[500px] max-h-[500px] bg-gold/5 blur-[100px] rounded-full animate-float-1 z-0"></div>
+
+        <div class="absolute inset-0 z-0 overflow-hidden">
+          <div class="particle p-1"></div>
+          <div class="particle p-2"></div>
+          <div class="particle p-3"></div>
+          <div class="particle p-4"></div>
+          <div class="particle p-5"></div>
+          <div class="particle p-6"></div>
+          <div class="particle p-7"></div>
+          <div class="particle p-8"></div>
+        </div>
+
+        <div class="z-10 text-center flex flex-col items-center px-6 mt-12">
+          <h1 class="font-display italic text-7xl md:text-8xl lg:text-[10rem] leading-none text-cloud tracking-tighter drop-shadow-2xl mb-4">Enten.</h1>
+          <h2 class="font-display text-3xl md:text-4xl text-cloud-muted font-light mb-8">On-Chain ETFs for Every Asset.</h2>
+
+          <div class="flex items-center gap-4 mb-14">
+            <div class="w-12 h-[1px] bg-gradient-to-r from-transparent to-teal/50"></div>
+            <div class="font-mono text-xs md:text-sm tracking-[0.3em] text-teal uppercase">Create. Customize. Compose. On-chain.</div>
+            <div class="w-12 h-[1px] bg-gradient-to-l from-transparent to-teal/50"></div>
           </div>
-        </div>
-      </section>
 
-      <section id="developers">
-        <div class="vision-text reveal">
-          <h2 class="t-display-lg">See Further.</h2>
-          <div class="hairline-rule"></div>
-          <p class="t-body-lg">
-            Enten is a launchpad for complete token systems &mdash; not just an ERC&#8209;20. Every
-            launch ships on day one with its accounting, treasury, distribution, and upgrade
-            machinery already wired together, then keeps evolving without asking holders to migrate.
-          </p>
-          <div class="data-card">
-            <div class="t-mono" style="margin-bottom: 8px;">CORE TENET</div>
-            <p class="t-body">Backing per token can only rise. Every system action is checked against it &mdash; anything that would dilute holders reverts.</p>
-          </div>
-        </div>
-
-        <div aria-hidden="true"></div>
-      </section>
-
-      <section id="system">
-        <div class="reveal">
-          <div class="sys-label t-mono">SYS_02 // ARCHITECTURE</div>
-          <h2 class="t-display-md">Routing &amp;<br>Execution</h2>
-          <p class="t-body" style="margin-top: 24px; max-width: 400px;">
-            A fixed core &mdash; Controller, Token, Vault, and Kernel &mdash; holds each system's
-            accounting and upgrade invariants. Bounded capabilities like auctions, borrowing, and
-            treasury strategies install on top as modules and policies, each granted only the
-            authority it needs.
-          </p>
-        </div>
-
-        <div class="tech-panel reveal" style="transition-delay: 0.2s;">
-          <div class="t-mono">ENTEN_RUNTIME_ENV</div>
-          <div class="hairline-rule" style="margin: 16px 0;"></div>
-          <div class="code-snippet" aria-label="Enten runtime environment concept in Rust-style syntax">
-            <span class="keyword">use</span> enten_core::{Controller, Settle};<br><br>
-            <span class="keyword">let</span> system = Controller::launch(Core {<br>
-            &nbsp;&nbsp;token: <span>Token::capped(MAX)</span>,<br>
-            &nbsp;&nbsp;vault: <span>Vault::backed()</span>,<br>
-            &nbsp;&nbsp;kernel: <span>Kernel::unified()</span>,<br>
-            });<br><br>
-            system.settle(Settle::Mint { .. })?;<br>
-            <span style="color: var(--c-cloud-faint);">// reverts unless backing-per-token holds</span>
-          </div>
-        </div>
-      </section>
-
-      <section id="resources">
-        <div class="reveal">
-          <div class="sys-label t-mono">SYS_03 // PARTICIPATION</div>
-          <div class="ecosystem-grid">
-            <a class="eco-module" href="/swap">
-              <div class="t-mono" style="margin-bottom: 24px; color: var(--c-gold);">ACTIVATE</div>
-              <h3>Enter the Portal</h3>
-              <p class="t-body">Open the swap interface for supported assets, wallet balances, and configured route execution.</p>
+          <div class="flex flex-col sm:flex-row gap-6 items-center">
+            <a href="/swap" class="w-64 sm:w-auto px-10 py-5 bg-gold text-base font-mono text-[11px] tracking-[0.3em] uppercase font-semibold text-navy hover:bg-[#F2B565] transition-all shadow-[0_0_30px_rgba(239,161,67,0.2)] hover:shadow-[0_0_40px_rgba(239,161,67,0.4)] hover:-translate-y-0.5">
+              Enter Terminal
             </a>
-
-            <a class="eco-module" href="/auction">
-              <div class="t-mono" style="margin-bottom: 24px; color: var(--c-teal);">MARKETS</div>
-              <h3>System Auctions</h3>
-              <p class="t-body">View live auction price, lot size, remaining supply, backing, and wallet-ready buy flow.</p>
-            </a>
-
-            <a class="eco-module" id="docs" href="/docs">
-              <div class="t-mono" style="margin-bottom: 24px;">RESOURCES</div>
-              <h3>Documentation</h3>
-              <p class="t-body">Comprehensive guides to architectural concepts, integration patterns, and contract logic.</p>
+            <a href="/docs" class="w-64 sm:w-auto px-10 py-5 border border-cloud-hairline bg-base/40 backdrop-blur-sm text-cloud font-mono text-[11px] tracking-[0.3em] uppercase hover:bg-cloud-hairline hover:border-cloud-faint transition-all">
+              View Protocol
             </a>
           </div>
+        </div>
 
-          <div class="footer-bottom t-mono">
-            <div>(C) ENTEN PROTOCOL 2026</div>
-            <div class="footer-links" id="github">
-              <a href="#github">TWITTER</a>
-              <a href="#github">DISCORD</a>
-              <a href="#github">TERMS</a>
+        <div class="absolute bottom-0 w-full border-t border-b border-cloud-hairline bg-base/60 backdrop-blur-md py-3 overflow-hidden z-20">
+          <div class="flex w-[200%] ticker-scroll font-mono text-[10px] tracking-[0.2em] text-cloud-muted uppercase items-center">
+
+            <div class="flex-1 flex justify-around items-center min-w-full gap-8 px-4">
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-cloud-muted rounded-full"></span>Total Value Locked <span class="text-cloud ml-2">Coming Soon</span></div>
+              <div class="text-cloud-hairline">///</div>
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-gold rounded-full"></span>Active ETFs <span class="text-gold ml-2">Coming Soon</span></div>
+              <div class="text-cloud-hairline">///</div>
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-teal rounded-full animate-pulse"></span>Network <span class="text-teal ml-2">MegaETH</span></div>
+              <div class="text-cloud-hairline">///</div>
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-cloud-muted rounded-full"></span>24H Volume <span class="text-cloud ml-2">Coming Soon</span></div>
+              <div class="text-cloud-hairline">///</div>
+            </div>
+
+            <div class="flex-1 flex justify-around items-center min-w-full gap-8 px-4">
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-cloud-muted rounded-full"></span>Total Value Locked <span class="text-cloud ml-2">Coming Soon</span></div>
+              <div class="text-cloud-hairline">///</div>
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-gold rounded-full"></span>Active ETFs <span class="text-gold ml-2">Coming Soon</span></div>
+              <div class="text-cloud-hairline">///</div>
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-teal rounded-full animate-pulse"></span>Network <span class="text-teal ml-2">MegaETH</span></div>
+              <div class="text-cloud-hairline">///</div>
+              <div class="flex items-center gap-3"><span class="w-1 h-1 bg-cloud-muted rounded-full"></span>24H Volume <span class="text-cloud ml-2">Coming Soon</span></div>
+              <div class="text-cloud-hairline">///</div>
             </div>
           </div>
         </div>
       </section>
+
+      <section class="w-full max-w-7xl mx-auto px-6 py-32 z-10">
+        <div class="font-mono text-[10px] tracking-[0.4em] text-cloud-muted uppercase mb-16 text-center flex items-center justify-center gap-4">
+          <div class="w-12 h-[1px] bg-cloud-hairline"></div>
+          Core Modules
+          <div class="w-12 h-[1px] bg-cloud-hairline"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+          <a href="/presale" class="border border-cloud-hairline bg-base/40 backdrop-blur-md p-10 group hover:-translate-y-2 hover:border-gold/30 transition-all duration-500 relative overflow-hidden flex flex-col min-h-[380px] cursor-pointer shadow-xl shadow-black/50 hover:bg-base/60">
+            <div class="absolute top-0 right-0 w-64 h-64 bg-gold/5 blur-[80px] rounded-full translate-x-1/3 -translate-y-1/3 group-hover:bg-gold/15 transition-colors duration-700"></div>
+
+            <div class="w-14 h-14 rounded-full border border-gold/20 flex items-center justify-center mb-10 bg-gold/5 group-hover:bg-gold/10 group-hover:border-gold/40 transition-colors z-10">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#EFA143" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+              </svg>
+            </div>
+
+            <div class="z-10 mt-auto">
+              <div class="font-mono text-[10px] text-gold tracking-widest mb-4">01.</div>
+              <h3 class="font-display italic text-4xl text-cloud mb-4 group-hover:text-gold transition-colors">Presale.</h3>
+              <p class="font-mono text-xs tracking-[0.1em] text-cloud-muted leading-loose uppercase">ETF Launch Protocol.<br>Fair price discovery for any asset.</p>
+            </div>
+
+            <div class="absolute bottom-10 right-10 opacity-0 transform translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-500 font-mono text-[9px] tracking-[0.2em] text-gold uppercase flex items-center gap-2">
+              Access Module
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"></path>
+              </svg>
+            </div>
+          </a>
+
+          <a href="/launch" class="border border-cloud-hairline bg-base/40 backdrop-blur-md p-10 group hover:-translate-y-2 hover:border-teal/30 transition-all duration-500 relative overflow-hidden flex flex-col min-h-[380px] cursor-pointer shadow-xl shadow-black/50 hover:bg-base/60 mt-0 lg:mt-12">
+            <div class="absolute top-0 right-0 w-64 h-64 bg-teal/5 blur-[80px] rounded-full translate-x-1/3 -translate-y-1/3 group-hover:bg-teal/15 transition-colors duration-700"></div>
+
+            <div class="w-14 h-14 rounded-full border border-teal/20 flex items-center justify-center mb-10 bg-teal/5 group-hover:bg-teal/10 group-hover:border-teal/40 transition-colors z-10">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4CB2A8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+            </div>
+
+            <div class="z-10 mt-auto">
+              <div class="font-mono text-[10px] text-teal tracking-widest mb-4">02.</div>
+              <h3 class="font-display italic text-4xl text-cloud mb-4 group-hover:text-teal transition-colors">Launch.</h3>
+              <p class="font-mono text-xs tracking-[0.1em] text-cloud-muted leading-loose uppercase">Index Factory.<br>Custom strategies, any composition.</p>
+            </div>
+
+            <div class="absolute bottom-10 right-10 opacity-0 transform translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-500 font-mono text-[9px] tracking-[0.2em] text-teal uppercase flex items-center gap-2">
+              Access Module
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"></path>
+              </svg>
+            </div>
+          </a>
+
+          <a href="/borrow" class="border border-cloud-hairline bg-base/40 backdrop-blur-md p-10 group hover:-translate-y-2 hover:border-cloud/30 transition-all duration-500 relative overflow-hidden flex flex-col min-h-[380px] cursor-pointer shadow-xl shadow-black/50 hover:bg-base/60">
+            <div class="absolute top-0 right-0 w-64 h-64 bg-cloud/5 blur-[80px] rounded-full translate-x-1/3 -translate-y-1/3 group-hover:bg-cloud/10 transition-colors duration-700"></div>
+
+            <div class="w-14 h-14 rounded-full border border-cloud/20 flex items-center justify-center mb-10 bg-cloud/5 group-hover:bg-cloud/10 group-hover:border-cloud/40 transition-colors z-10">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F4F4F2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+            </div>
+
+            <div class="z-10 mt-auto">
+              <div class="font-mono text-[10px] text-cloud-muted tracking-widest mb-4">03.</div>
+              <h3 class="font-display italic text-4xl text-cloud mb-4 group-hover:text-cloud transition-colors">Borrow.</h3>
+              <p class="font-mono text-xs tracking-[0.1em] text-cloud-muted leading-loose uppercase">Composable Lending.<br>Build anything on top.</p>
+            </div>
+
+            <div class="absolute bottom-10 right-10 opacity-0 transform translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-500 font-mono text-[9px] tracking-[0.2em] text-cloud uppercase flex items-center gap-2">
+              Access Module
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"></path>
+              </svg>
+            </div>
+          </a>
+        </div>
+      </section>
+
+      <section class="w-full border-t border-b border-cloud-hairline bg-base/50 backdrop-blur-md z-10 relative mt-16">
+        <div class="max-w-7xl mx-auto px-6 py-20">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 lg:gap-0 lg:divide-x divide-cloud-hairline relative">
+
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-1/2 bg-teal/5 blur-[100px] rounded-full pointer-events-none"></div>
+
+            <div class="flex flex-col items-center justify-center text-center px-4 relative z-10 group">
+              <div class="font-mono text-[10px] tracking-[0.3em] text-cloud-muted uppercase mb-4 group-hover:text-teal transition-colors">Total Value Locked</div>
+              <div class="font-mono text-2xl lg:text-3xl text-cloud-muted group-hover:scale-105 transition-transform">Coming Soon</div>
+            </div>
+
+            <div class="flex flex-col items-center justify-center text-center px-4 relative z-10 group">
+              <div class="font-mono text-[10px] tracking-[0.3em] text-cloud-muted uppercase mb-4 group-hover:text-gold transition-colors">ETF Markets</div>
+              <div class="font-mono text-2xl lg:text-3xl text-cloud-muted group-hover:scale-105 transition-transform">Coming Soon</div>
+            </div>
+
+            <div class="flex flex-col items-center justify-center text-center px-4 relative z-10 group">
+              <div class="font-mono text-[10px] tracking-[0.3em] text-cloud-muted uppercase mb-4 group-hover:text-teal transition-colors">ETFs Launched</div>
+              <div class="font-mono text-2xl lg:text-3xl text-cloud-muted group-hover:scale-105 transition-transform">Coming Soon</div>
+            </div>
+
+            <div class="flex flex-col items-center justify-center text-center px-4 relative z-10 group">
+              <div class="font-mono text-[10px] tracking-[0.3em] text-cloud-muted uppercase mb-4 group-hover:text-cloud transition-colors">24h Volume</div>
+              <div class="font-mono text-2xl lg:text-3xl text-cloud-muted group-hover:scale-105 transition-transform">Coming Soon</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="w-full h-48 relative overflow-hidden z-0">
+        <div class="absolute inset-0 bg-gradient-to-r from-base via-teal/10 to-base animate-aurora bg-[length:200%_200%] opacity-50"></div>
+        <div class="absolute inset-0 bg-gradient-to-b from-base to-transparent"></div>
+        <div class="absolute inset-0 bg-gradient-to-t from-base to-transparent"></div>
+      </section>
+
+      <section class="w-full max-w-4xl mx-auto px-6 py-24 text-center z-10 relative flex flex-col items-center">
+        <div class="w-[1px] h-32 bg-gradient-to-b from-transparent via-gold/50 to-transparent mb-12"></div>
+
+        <blockquote class="font-display italic text-5xl md:text-6xl lg:text-7xl text-cloud leading-[1.1] tracking-tight drop-shadow-2xl">
+          "The most flexible system.<br>
+          <span class="text-cloud-muted">For anything you build."</span>
+        </blockquote>
+
+        <div class="font-mono text-[10px] md:text-xs tracking-[0.4em] text-gold uppercase mt-16 flex items-center gap-6 bg-gold/5 border border-gold/10 px-8 py-3">
+          <span class="w-2 h-2 rounded-full bg-gold"></span>
+          Enten Protocol — ETF Infrastructure
+        </div>
+
+        <div class="w-[1px] h-32 bg-gradient-to-b from-transparent via-cloud-hairline to-transparent mt-12 mb-12"></div>
+      </section>
+
     </main>
+
+    <footer class="w-full px-6 md:px-12 py-8 flex flex-col md:flex-row justify-between items-center font-mono text-[9px] tracking-widest text-cloud-muted uppercase border-t border-cloud-hairline bg-base/90 backdrop-blur-md z-[100] gap-6 md:gap-0 mt-auto">
+      <div class="flex flex-wrap justify-center md:justify-start gap-6 md:gap-10">
+        <div class="flex items-center gap-2"><span class="w-1 h-1 bg-green-500 rounded-full"></span> Network: MegaETH</div>
+        <div class="flex items-center gap-2">Status: Coming Soon</div>
+      </div>
+
+      <div class="flex items-center gap-8">
+        <a href="/docs" class="hover:text-cloud transition-colors">Docs</a>
+        <a href="#github" class="hover:text-cloud transition-colors">Github</a>
+        <a href="#twitter" class="hover:text-cloud transition-colors">Twitter</a>
+        <a href="#discord" class="hover:text-cloud transition-colors">Discord</a>
+      </div>
+
+      <div class="text-cloud-muted/50">
+        © 2026 Enten Protocol System
+      </div>
+    </footer>
 
     <script>
       (function () {
@@ -687,226 +457,6 @@
         }
 
         cleanupLocalServiceWorker();
-
-        var prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-        function setupCrosshair() {
-          var horizontal = document.getElementById("ch-h");
-          var vertical = document.getElementById("ch-v");
-
-          if (!horizontal || !vertical || window.matchMedia("(pointer: coarse)").matches) return;
-
-          document.addEventListener("mousemove", function (event) {
-            horizontal.style.top = event.clientY + "px";
-            vertical.style.left = event.clientX + "px";
-          });
-        }
-
-        function setupReveal() {
-          var revealNodes = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
-
-          if (!("IntersectionObserver" in window)) {
-            revealNodes.forEach(function (node) {
-              node.classList.add("active");
-            });
-            return;
-          }
-
-          var observer = new IntersectionObserver(
-            function (entries) {
-              entries.forEach(function (entry) {
-                if (!entry.isIntersecting) return;
-                entry.target.classList.add("active");
-                observer.unobserve(entry.target);
-              });
-            },
-            {
-              root: null,
-              rootMargin: "0px",
-              threshold: 0.15
-            }
-          );
-
-          revealNodes.forEach(function (node) {
-            observer.observe(node);
-          });
-        }
-
-        function setupAltitude() {
-          var altVal = document.getElementById("alt-val");
-          var header = document.querySelector(".global-nav");
-
-          function update() {
-            var maxScroll = Math.max(1, document.body.scrollHeight - window.innerHeight);
-            var progress = Math.min(1, Math.max(0, window.scrollY / maxScroll));
-            var currentAlt = Math.max(0, Math.floor(84000 * (1 - progress)));
-
-            if (altVal) {
-              altVal.textContent = currentAlt.toLocaleString();
-            }
-
-            if (!header) return;
-            if (window.scrollY > 80) {
-              header.style.opacity = "0";
-              header.style.pointerEvents = "none";
-              header.style.visibility = "hidden";
-            } else {
-              header.style.opacity = "1";
-              header.style.pointerEvents = "auto";
-              header.style.visibility = "visible";
-            }
-          }
-
-          window.addEventListener("scroll", update, { passive: true });
-          window.addEventListener("resize", update);
-          update();
-        }
-
-        function activateFallback() {
-          var container = document.getElementById("webgl-container");
-          if (container) {
-            container.classList.add("fallback-bg");
-          }
-        }
-
-        function initWebGL() {
-          var container = document.getElementById("webgl-container");
-          var THREE = window.THREE;
-          var scene;
-          var camera;
-          var renderer;
-          var vertexShader;
-          var fragmentShader;
-          var uniforms;
-          var plane;
-          var animationFrame = 0;
-
-          if (!container || !THREE) {
-            activateFallback();
-            return;
-          }
-
-          try {
-            scene = new THREE.Scene();
-            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-            container.appendChild(renderer.domElement);
-          } catch (error) {
-            activateFallback();
-            return;
-          }
-
-          vertexShader = [
-            "varying vec2 vUv;",
-            "void main() {",
-            "  vUv = uv;",
-            "  gl_Position = vec4(position, 1.0);",
-            "}"
-          ].join("\n");
-
-          fragmentShader = [
-            "uniform float u_scroll;",
-            "uniform vec2 u_resolution;",
-            "varying vec2 vUv;",
-            "vec3 colorNavy = vec3(0.06, 0.09, 0.15);",
-            "vec3 colorIndigo = vec3(0.09, 0.10, 0.17);",
-            "vec3 colorPlum = vec3(0.14, 0.09, 0.13);",
-            "vec3 colorBase = vec3(0.03, 0.03, 0.045);",
-            "float random(vec2 st) {",
-            "  return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);",
-            "}",
-            "void main() {",
-            "  float globalY = vUv.y * 0.3 + (1.0 - u_scroll) * 0.7;",
-            "  vec3 finalColor;",
-            "  if (globalY > 0.6) {",
-            "    finalColor = mix(colorIndigo, colorNavy, smoothstep(0.6, 1.0, globalY));",
-            "  } else if (globalY > 0.2) {",
-            "    finalColor = mix(colorPlum, colorIndigo, smoothstep(0.2, 0.6, globalY));",
-            "  } else {",
-            "    finalColor = mix(colorBase, colorPlum, smoothstep(0.0, 0.2, globalY));",
-            "  }",
-            "  float noise = random(vUv * u_resolution) * 0.05;",
-            "  finalColor -= noise;",
-            "  finalColor *= 0.88;",
-            "  gl_FragColor = vec4(finalColor, 1.0);",
-            "}"
-          ].join("\n");
-
-          uniforms = {
-            u_scroll: { value: 0 },
-            u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
-          };
-
-          plane = new THREE.Mesh(
-            new THREE.PlaneGeometry(2, 2),
-            new THREE.ShaderMaterial({
-              vertexShader: vertexShader,
-              fragmentShader: fragmentShader,
-              uniforms: uniforms,
-              depthWrite: false,
-              depthTest: false
-            })
-          );
-          scene.add(plane);
-
-          function scrollProgress() {
-            return Math.min(1, Math.max(0, window.scrollY / Math.max(1, document.body.scrollHeight - window.innerHeight)));
-          }
-
-          function render() {
-            var progress = scrollProgress();
-
-            uniforms.u_scroll.value = progress;
-
-            renderer.autoClear = true;
-            renderer.render(scene, camera);
-          }
-
-          function animate() {
-            render();
-            if (!prefersReducedMotion) {
-              animationFrame = window.requestAnimationFrame(animate);
-            }
-          }
-
-          window.addEventListener("scroll", render, { passive: true });
-          window.addEventListener("resize", function () {
-            var width = window.innerWidth;
-            var height = window.innerHeight;
-
-            renderer.setSize(width, height);
-            uniforms.u_resolution.value.set(width, height);
-            render();
-          });
-
-          animate();
-
-          window.addEventListener("pagehide", function () {
-            if (animationFrame) {
-              window.cancelAnimationFrame(animationFrame);
-            }
-          });
-        }
-
-        function initWebGLWhenReady(attempt) {
-          if (window.THREE || attempt >= 30) {
-            initWebGL();
-            return;
-          }
-
-          window.setTimeout(function () {
-            initWebGLWhenReady(attempt + 1);
-          }, 100);
-        }
-
-        document.addEventListener("DOMContentLoaded", function () {
-          setupCrosshair();
-          setupReveal();
-          setupAltitude();
-          initWebGLWhenReady(0);
-        });
       })();
     </script>
   </body>
