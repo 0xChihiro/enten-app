@@ -130,6 +130,10 @@ import {
       },
       kumbaya: {
         quoterV2: "0x1F1a8dC7E138C34b503Ca080962aC10B75384a27",
+        // Kumbaya SwapRouter02 (Uniswap V3 style). Confirmed on-chain: factory ===
+        // QuoterV2 factory, WETH9 set, V3-only (no factoryV2). It quotes via eth_call
+        // simulation and executes exactInputSingle / exactInput.
+        swapRouter: "0xe5bbef8de2db447a7432a47eba58924d94ee470e",
         usdToken: {
           address: "0xfafddbb3fc7688494971a79cc65dca3ef82079e7",
           symbol: "USDm",
@@ -225,8 +229,8 @@ import {
   var DEFAULT_CHAIN_ID = "0x10e6"; // MegaETH Mainnet (4326). Testnet (0x18c7) stays selectable.
   var PREFERRED_CHAIN_KEY = "enten.preferredChainId";
   var NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
-  var SWAP_TRADING_ENABLED = false;
-  var SWAP_UNAVAILABLE_MESSAGE = "Trading is not live yet. Liquidity has not been added, so swaps are unavailable.";
+  var SWAP_TRADING_ENABLED = true;
+  var SWAP_UNAVAILABLE_MESSAGE = "Swaps are only available on MegaETH mainnet right now.";
 
   var ERC20_ABI = parseAbi([
     "function balanceOf(address owner) view returns (uint256)",
@@ -311,7 +315,15 @@ import {
   // Kumbaya QuoterV2 (Uniswap V3 style). The quote functions are nonpayable on-chain but are
   // designed to be invoked via eth_call, so we declare them view to read them with readContract.
   var QUOTER_V2_ABI = parseAbi([
-    "function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96) params) view returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)"
+    "function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96) params) view returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
+    "function quoteExactInput(bytes path, uint256 amountIn) view returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)"
+  ]);
+
+  // Kumbaya SwapRouter02 (Uniswap swap-router-contracts variant — note the structs
+  // have NO deadline field; deadlines are only available via the multicall overload).
+  var SWAP_ROUTER_ABI = parseAbi([
+    "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) payable returns (uint256 amountOut)",
+    "function exactInput((bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum) params) payable returns (uint256 amountOut)"
   ]);
 
   var CONTROLLER_FACTORY_ABI = [
@@ -397,8 +409,11 @@ import {
   var networkModal = null;
   var swapUiState = {
     reversed: false,
-    quoteId: "ETH"
+    quoteId: "MEGA",
+    slippageBps: 50,
+    lastQuote: null
   };
+  var swapQuoteTimer = null;
   var auctionUiState = {
     remainingLot: null,
     prices: [],
@@ -1963,6 +1978,7 @@ import {
     }
 
     if (kind === "swap") {
+      if (chain.kumbaya && isAddress(chain.kumbaya.swapRouter)) return chain.kumbaya.swapRouter;
       return chain.uniswap && chain.uniswap.universalRouter ? chain.uniswap.universalRouter : "";
     }
 
@@ -2121,8 +2137,7 @@ import {
     var pair = currentSwapTokens();
 
     if (!pair.pay || !pair.receive) return;
-    setText("[data-route-label]", pair.pay.symbol + " -> " + pair.receive.symbol + " (Universal Router)");
-    setText("[data-price-label]", "Best price via V2/V3/V4 route");
+    setText("[data-route-label]", pair.pay.symbol + " → " + pair.receive.symbol + " (Kumbaya)");
   }
 
   function renderSwapControls() {
@@ -2200,159 +2215,342 @@ import {
     }
   }
 
-  function routeTokenAddress(token) {
-    if (!token) return "";
-    return token.native ? NATIVE_TOKEN_ADDRESS : token.address;
+  function formatUsdPrice(usd) {
+    if (!usd || !usd.amount || usd.amount <= 0n) return "--";
+    return "$" + formatUnits(usd.amount, usd.decimals, 6);
+  }
+
+  function swapKernelAddress(chain) {
+    if (chain && chain.borrow && isAddress(chain.borrow.kernelAddress)) return chain.borrow.kernelAddress;
+    if (chain && chain.presale && isAddress(chain.presale.kernelAddress)) return chain.presale.kernelAddress;
+    return "";
+  }
+
+  // USD value backing one ENTEN if redeemed: backingPerToken (backing-asset amount
+  // per ENTEN, from the kernel — same math the presale/borrow pages use) priced
+  // through the backing asset's USD quote on Kumbaya. Returns a "$x" string or "--".
+  async function readEntenBackingUsd(chain, enten) {
+    var backingAsset = presaleBackingAssetConfig(chain);
+    var kernel = swapKernelAddress(chain);
+
+    if (!backingAsset || !isAddress(backingAsset.address) || !isAddress(kernel)) return "--";
+
+    var results = await publicClientForChain(chain).multicall({
+      allowFailure: true,
+      contracts: [
+        { address: enten.address, abi: ERC20_ABI, functionName: "totalSupply", args: [] },
+        {
+          address: kernel,
+          abi: KERNEL_VIEW_ABI,
+          functionName: "viewData",
+          args: [backingStateSlots(backingAsset.address)]
+        }
+      ]
+    });
+
+    var totalSupply = results[0] && results[0].status === "success" ? results[0].result : null;
+    var backingState = results[1] && results[1].status === "success" && Array.isArray(results[1].result) ? results[1].result : null;
+    var backingPerToken = backingPerTokenFromState(backingState, totalSupply);
+    if (backingPerToken === null) return "--";
+
+    var assetUsd = await readAssetUsdPrice(chain, backingAsset.address);
+    if (!assetUsd || !assetUsd.amount || assetUsd.amount <= 0n) return "--";
+
+    // backingPerToken is backing-asset wei per 1 ENTEN; assetUsd.amount is USD wei
+    // per 1 whole backing token, so normalise by WAD to get USD wei per ENTEN.
+    return "$" + formatUnits((backingPerToken * assetUsd.amount) / WAD, assetUsd.decimals, 6);
+  }
+
+  // Market context for the swap page: the live ENTEN price in USDm and the USD
+  // value backing one ENTEN on redemption. Works pre-connect over the chain RPC.
+  async function loadSwapMarketPrices() {
+    var chain = activeSwapChainConfig();
+    var kumbaya = kumbayaConfig(chain);
+    var enten = outputTokenConfig(chain);
+
+    if (!chain || !kumbaya || !enten || !isAddress(enten.address) || !$("[data-enten-price]")) return;
+
+    try {
+      setText("[data-enten-price]", formatUsdPrice(await readAssetUsdPrice(chain, enten.address)));
+    } catch (error) {
+      setText("[data-enten-price]", "--");
+    }
+
+    try {
+      setText("[data-enten-backing]", await readEntenBackingUsd(chain, enten));
+    } catch (error) {
+      setText("[data-enten-backing]", "--");
+    }
   }
 
   function canRouteToken(token) {
     return token && (token.native || isAddress(token.address));
   }
 
-  function buildRouteRequest(chain, pair, amountIn) {
-    return {
-      type: "EXACT_INPUT",
-      amount: amountIn.toString(),
-      tokenInChainId: chain.chainIdDecimal,
-      tokenOutChainId: chain.chainIdDecimal,
-      tokenIn: routeTokenAddress(pair.pay),
-      tokenOut: routeTokenAddress(pair.receive),
-      swapper: state.account,
-      slippageTolerance: chain.uniswap.slippageTolerance,
-      protocols: chain.uniswap.protocols,
-      routingPreference: chain.uniswap.routingPreference,
-      universalRouterVersion: chain.uniswap.universalRouterVersion,
-      universalRouter: chain.uniswap.universalRouter
-    };
+  // Kumbaya is a Uniswap V3 fork. ENTEN only has a pool against USDm, so every
+  // non-USDm quote token (e.g. MEGA) routes through USDm as an intermediate hop.
+  // The quote token is whichever side of the pair is not ENTEN.
+  function swapRouteTokens(chain, payToken, receiveToken) {
+    var kumbaya = kumbayaConfig(chain);
+    var enten = outputTokenConfig(chain);
+    var usd = kumbaya && kumbaya.usdToken ? kumbaya.usdToken : null;
+
+    if (!enten || !usd || !payToken || !receiveToken) return null;
+    if (!isAddress(payToken.address) || !isAddress(receiveToken.address)) return null;
+    if (!isAddress(enten.address) || !isAddress(usd.address)) return null;
+
+    var payIsEnten = payToken.address.toLowerCase() === enten.address.toLowerCase();
+    var quote = payIsEnten ? receiveToken : payToken;
+    // Both sides ENTEN, or neither side ENTEN — not a routable Enten swap.
+    if (quote.address.toLowerCase() === enten.address.toLowerCase()) return null;
+    if (!payIsEnten && receiveToken.address.toLowerCase() !== enten.address.toLowerCase()) return null;
+
+    // Canonical chain runs quote -> ENTEN; reverse it when selling ENTEN.
+    var canonical =
+      quote.address.toLowerCase() === usd.address.toLowerCase()
+        ? [usd.address, enten.address]
+        : [quote.address, usd.address, enten.address];
+
+    return payIsEnten ? canonical.slice().reverse() : canonical;
   }
 
-  async function fetchUniversalRouterPlan(chain, routeRequest) {
-    var endpoint = chain.uniswap.routeApiUrl || window.ENTEN_ROUTE_API || "";
-    var response;
-
-    if (!endpoint) {
-      var missingEndpoint = new Error("Universal Router route endpoint is not configured.");
-      missingEndpoint.code = "NO_ROUTE_ENDPOINT";
-      throw missingEndpoint;
-    }
-
-    response = await window.fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(routeRequest)
-    });
-
-    if (!response.ok) {
-      throw new Error("Route request failed with HTTP " + response.status + ".");
-    }
-
-    return response.json();
-  }
-
-  function routePlanTransaction(plan) {
-    if (!plan) return null;
-    return plan.swap || plan.transaction || plan.tx || plan;
-  }
-
-  function routePlanApprovalTransactions(plan) {
-    var approvals = [];
-
-    ["approval", "approvalTransaction", "approvalTx", "permit2Approval"].forEach(function (key) {
-      var item = plan && plan[key];
-      if (!item) return;
-      if (Array.isArray(item)) {
-        approvals = approvals.concat(item);
-      } else {
-        approvals.push(item);
+  // Uniswap V3 path: token0 (20 bytes) + fee0 (uint24, 3 bytes) + token1 + fee1 + ...
+  function encodeV3Path(tokens, fees) {
+    var path = "0x";
+    for (var i = 0; i < tokens.length; i += 1) {
+      path += tokens[i].toLowerCase().replace(/^0x/, "");
+      if (i < fees.length) {
+        path += fees[i].toString(16).padStart(6, "0");
       }
-    });
+    }
+    return path;
+  }
 
-    return approvals
-      .map(function (approval) {
-        return approval && (approval.transaction || approval.tx || approval);
-      })
-      .filter(function (approval) {
-        return approval && isAddress(approval.to) && /^0x[0-9a-fA-F]*$/.test(String(approval.data || ""));
+  // Every combination of fee tiers across `hops` hops (cartesian product).
+  function feeTierCombos(feeTiers, hops) {
+    var combos = [[]];
+    for (var h = 0; h < hops; h += 1) {
+      var next = [];
+      combos.forEach(function (combo) {
+        feeTiers.forEach(function (fee) {
+          next.push(combo.concat([fee]));
+        });
       });
+      combos = next;
+    }
+    return combos;
   }
 
-  async function submitApprovalTransactions(plan) {
-    var approvals = routePlanApprovalTransactions(plan);
+  // Quotes every candidate path/fee combination through the Kumbaya QuoterV2 in a
+  // single multicall and keeps the one with the largest output. Returns
+  // { amountOut, tokens, fees } or null when no pool can fill the trade.
+  async function quoteBestKumbayaSwap(chain, payToken, receiveToken, amountIn) {
+    var kumbaya = kumbayaConfig(chain);
+    if (!kumbaya || !isAddress(kumbaya.quoterV2) || amountIn <= 0n) return null;
 
-    for (var index = 0; index < approvals.length; index += 1) {
-      var approval = approvals[index];
-      var receipt;
-      var approvalTx;
-      var txHash;
+    var tokens = swapRouteTokens(chain, payToken, receiveToken);
+    if (!tokens) return null;
 
-      approvalTx = {
-        from: state.account,
-        to: approval.to,
-        data: approval.data || "0x",
-        value: approval.value === undefined ? 0n : approval.value
-      };
+    var feeTiers = Array.isArray(kumbaya.feeTiers) && kumbaya.feeTiers.length ? kumbaya.feeTiers : [3000];
+    var combos = feeTierCombos(feeTiers, tokens.length - 1);
+    var client = publicClientForChain(chain);
+    var results;
 
-      setStatus("[data-page-status]", "Simulating approval " + (index + 1) + " of " + approvals.length + "...", "warn");
-      await simulateTransaction(approvalTx);
+    try {
+      results = await client.multicall({
+        allowFailure: true,
+        contracts: combos.map(function (fees) {
+          return {
+            address: kumbaya.quoterV2,
+            abi: QUOTER_V2_ABI,
+            functionName: "quoteExactInput",
+            args: [encodeV3Path(tokens, fees), amountIn]
+          };
+        })
+      });
+    } catch (error) {
+      return null;
+    }
 
-      setStatus("[data-page-status]", "Submitting approval " + (index + 1) + " of " + approvals.length + "...", "warn");
-      txHash = await sendTransaction(approvalTx);
-
-      setStatus("[data-page-status]", "Waiting for approval confirmation...", "warn");
-      receipt = await waitForTransaction(txHash);
-      if (!receipt) {
-        throw new Error("Approval is still pending.");
+    var best = null;
+    results.forEach(function (result, index) {
+      if (!result || result.status !== "success" || !result.result) return;
+      var out = BigInt(result.result[0] || 0);
+      if (out > 0n && (!best || out > best.amountOut)) {
+        best = { amountOut: out, tokens: tokens, fees: combos[index] };
       }
-      if (receipt.status === "0x0") {
-        throw new Error("Approval transaction reverted.");
-      }
-    }
+    });
+
+    return best;
   }
 
-  function normalizedRouteTransaction(plan, chain, pair, amountIn) {
-    var tx = routePlanTransaction(plan);
-    var to = tx && tx.to ? tx.to : chain.uniswap.universalRouter;
-    var data = tx && tx.data ? tx.data : "";
-    var value = tx && tx.value !== undefined ? tx.value : pair.pay.native ? amountIn : 0n;
-
-    if (!isAddress(to) || to.toLowerCase() !== chain.uniswap.universalRouter.toLowerCase()) {
-      throw new Error("Route did not target the configured Universal Router.");
-    }
-    if (!/^0x[0-9a-fA-F]+$/.test(String(data || ""))) {
-      throw new Error("Route did not include valid calldata.");
-    }
-
-    return {
-      from: state.account,
-      to: to,
-      data: data,
-      value: value
-    };
+  function applySlippage(amountOut, bps) {
+    var min = (amountOut * BigInt(10000 - bps)) / 10000n;
+    return min > 0n ? min : 1n;
   }
 
-  function updateReceiveAmountFromPlan(plan, receiveToken) {
-    var amountOut =
-      plan &&
-      (plan.amountOut ||
-        plan.outputAmount ||
-        (plan.quote && (plan.quote.amountOut || plan.quote.outputAmount || plan.quote.quote)));
+  function buildKumbayaSwapData(best, recipient, amountIn, amountOutMin) {
+    if (best.fees.length === 1) {
+      return encodeFunctionData({
+        abi: SWAP_ROUTER_ABI,
+        functionName: "exactInputSingle",
+        args: [
+          {
+            tokenIn: best.tokens[0],
+            tokenOut: best.tokens[1],
+            fee: best.fees[0],
+            recipient: recipient,
+            amountIn: amountIn,
+            amountOutMinimum: amountOutMin,
+            sqrtPriceLimitX96: 0n
+          }
+        ]
+      });
+    }
+
+    return encodeFunctionData({
+      abi: SWAP_ROUTER_ABI,
+      functionName: "exactInput",
+      args: [
+        {
+          path: encodeV3Path(best.tokens, best.fees),
+          recipient: recipient,
+          amountIn: amountIn,
+          amountOutMinimum: amountOutMin
+        }
+      ]
+    });
+  }
+
+  function feeTierLabel(fee) {
+    return (fee / 10000).toFixed(2).replace(/\.?0+$/, "") + "%";
+  }
+
+  function renderSwapQuoteMeta(chain, pair, amountIn, best) {
+    var symbols = best.tokens.map(function (address) {
+      var token = tokenConfigForAddress(chain, address);
+      return token ? token.symbol : shortenAddress(address);
+    });
+    var feeLabels = best.fees.map(feeTierLabel).join(" · ");
+
+    setText("[data-route-label]", symbols.join(" → ") + " (" + feeLabels + ")");
+
+    var rate = "--";
+    if (amountIn > 0n) {
+      var oneUnit = 10n ** BigInt(pair.pay.decimals);
+      var perUnit = (best.amountOut * oneUnit) / amountIn;
+      rate = "1 " + pair.pay.symbol + " ≈ " + formatUnits(perUnit, pair.receive.decimals, 6) + " " + pair.receive.symbol;
+    }
+    setText("[data-price-label]", rate);
+  }
+
+  function clearSwapQuote() {
+    swapUiState.lastQuote = null;
+    var receiveInput = $("[data-receive-input]");
+    if (receiveInput) receiveInput.value = "";
+    updateSwapRouteLabels();
+    setText("[data-price-label]", "Enter an amount for a live quote");
+  }
+
+  // Debounced live quote driven by the pay input. Caches the winning route so the
+  // submit handler reuses it (and re-quotes fresh anyway before sending).
+  function scheduleSwapQuote() {
+    if (swapQuoteTimer) window.clearTimeout(swapQuoteTimer);
+    swapQuoteTimer = window.setTimeout(refreshSwapQuote, 350);
+  }
+
+  async function refreshSwapQuote() {
+    var chain = activeSwapChainConfig();
+    var pair = currentSwapTokens(chain);
+    var input = $("[data-pay-input]");
     var receiveInput = $("[data-receive-input]");
 
-    if (amountOut !== undefined && receiveInput && receiveToken) {
-      receiveInput.value = formatUnits(BigInt(amountOut), receiveToken.decimals, 6);
+    swapUiState.lastQuote = null;
+    if (!chain || !kumbayaConfig(chain) || !pair.pay || !pair.receive) return;
+
+    var amountIn = parseUnits(input ? input.value : "", pair.pay.decimals);
+    if (amountIn <= 0n) {
+      clearSwapQuote();
+      return;
     }
+
+    var payId = tokenId(pair.pay);
+    var receiveId = tokenId(pair.receive);
+    setText("[data-price-label]", "Fetching best route...");
+
+    var best;
+    try {
+      best = await quoteBestKumbayaSwap(chain, pair.pay, pair.receive, amountIn);
+    } catch (error) {
+      best = null;
+    }
+
+    // The user may have flipped or switched tokens while the quote was in flight.
+    var current = currentSwapTokens(activeSwapChainConfig());
+    if (tokenId(current.pay) !== payId || tokenId(current.receive) !== receiveId) return;
+
+    if (!best) {
+      if (receiveInput) receiveInput.value = "";
+      setText("[data-price-label]", "No route for this size");
+      return;
+    }
+
+    swapUiState.lastQuote = { best: best, amountIn: amountIn, payId: payId, receiveId: receiveId };
+    if (receiveInput) receiveInput.value = formatUnits(best.amountOut, pair.receive.decimals, 6);
+    renderSwapQuoteMeta(chain, pair, amountIn, best);
   }
 
-  async function submitUniversalRouterSwap() {
+  async function ensureKumbayaApproval(chain, payToken, amountIn) {
+    var router = chain.kumbaya.swapRouter;
+    var allowance;
+    var approvalTx;
+    var txHash;
+    var receipt;
+
+    try {
+      allowance = await tokenAllowance(payToken.address, state.account, router, chain);
+    } catch (error) {
+      setStatus("[data-page-status]", "Could not read " + payToken.symbol + " allowance.", "warn");
+      return false;
+    }
+
+    if (allowance >= amountIn) return true;
+
+    approvalTx = buildApproveTokenTransaction(payToken.address, router, amountIn);
+
+    setStatus("[data-page-status]", "Simulating " + payToken.symbol + " approval...", "warn");
+    try {
+      await simulateTransaction(approvalTx, chain);
+    } catch (error) {
+      setStatus("[data-page-status]", payToken.symbol + " approval preflight failed: " + simulationFailureMessage(error), "warn");
+      return false;
+    }
+
+    setStatus("[data-page-status]", "Approving " + payToken.symbol + " for the Kumbaya router...", "warn");
+    txHash = await sendTransaction(approvalTx, chain);
+
+    setStatus("[data-page-status]", "Waiting for " + payToken.symbol + " approval...", "warn");
+    receipt = await waitForTransaction(txHash, chain);
+    if (!receipt) {
+      setStatus("[data-page-status]", payToken.symbol + " approval is still pending. Try again once it confirms.", "warn");
+      return false;
+    }
+    if (receipt.status === "0x0") {
+      setStatus("[data-page-status]", payToken.symbol + " approval reverted.", "warn");
+      return false;
+    }
+    return true;
+  }
+
+  async function submitKumbayaSwap() {
     var chain = currentChainConfig();
+    var kumbaya = chain ? kumbayaConfig(chain) : null;
     var pair = chain ? currentSwapTokens(chain) : { pay: null, receive: null };
     var input = $("[data-pay-input]");
     var amountIn;
-    var plan;
-    var routeRequest;
-    var routeTx;
+    var best;
+    var amountOutMin;
+    var swapTx;
     var txHash;
 
     if (!SWAP_TRADING_ENABLED) {
@@ -2360,13 +2558,13 @@ import {
       return;
     }
 
-    if (!chain || !chain.uniswap || !isAddress(chain.uniswap.universalRouter)) {
-      setStatus("[data-page-status]", "Unsupported network for Universal Router swaps.", "warn");
+    if (!chain || !kumbaya || !isAddress(kumbaya.swapRouter)) {
+      setStatus("[data-page-status]", SWAP_UNAVAILABLE_MESSAGE, "warn");
       return;
     }
 
     if (!pair.pay || !pair.receive || !canRouteToken(pair.pay) || !canRouteToken(pair.receive)) {
-      setStatus("[data-page-status]", "Configure the Enten token address before enabling routes.", "warn");
+      setStatus("[data-page-status]", "Select tokens with Kumbaya liquidity.", "warn");
       return;
     }
 
@@ -2376,27 +2574,70 @@ import {
       return;
     }
 
-    routeRequest = buildRouteRequest(chain, pair, amountIn);
-
-    setStatus("[data-page-status]", "Requesting Universal Router route...", "warn");
-    try {
-      plan = await fetchUniversalRouterPlan(chain, routeRequest);
-      updateReceiveAmountFromPlan(plan, pair.receive);
-      await submitApprovalTransactions(plan);
-      routeTx = normalizedRouteTransaction(plan, chain, pair, amountIn);
-      setStatus("[data-page-status]", "Simulating Universal Router swap...", "warn");
-      await simulateTransaction(routeTx, chain);
-    } catch (error) {
-      if (error && error.code === "NO_ROUTE_ENDPOINT") {
-        setStatus("[data-page-status]", "Configure a route endpoint before enabling Universal Router swaps.", "warn");
-      } else {
-        setStatus("[data-page-status]", "Swap preflight failed: " + simulationFailureMessage(error), "warn");
-      }
+    // Always re-quote immediately before building calldata so the minimum-output
+    // bound reflects current pool state rather than a stale debounced quote.
+    setStatus("[data-page-status]", "Fetching the best Kumbaya route...", "warn");
+    best = await quoteBestKumbayaSwap(chain, pair.pay, pair.receive, amountIn);
+    if (!best) {
+      setStatus("[data-page-status]", "No Kumbaya route is available for this pair right now.", "warn");
       return;
     }
 
-    setStatus("[data-page-status]", "Submitting Universal Router swap...", "warn");
-    txHash = await sendTransaction(routeTx);
+    var receiveInput = $("[data-receive-input]");
+    if (receiveInput) receiveInput.value = formatUnits(best.amountOut, pair.receive.decimals, 6);
+    renderSwapQuoteMeta(chain, pair, amountIn, best);
+
+    amountOutMin = applySlippage(best.amountOut, swapUiState.slippageBps);
+    swapTx = {
+      from: state.account,
+      to: kumbaya.swapRouter,
+      data: buildKumbayaSwapData(best, state.account, amountIn, amountOutMin),
+      value: "0x0"
+    };
+
+    if (isMossWallet()) {
+      // MOSS rejects two sequential callContract calls, so batch approve + swap into
+      // one atomic userOp. With an approve in the batch the swap can't be simulated
+      // standalone (allowance isn't set yet); rely on the batch reverting as a whole.
+      var batch = [];
+      var allowance;
+      try {
+        allowance = await tokenAllowance(pair.pay.address, state.account, kumbaya.swapRouter, chain);
+      } catch (error) {
+        setStatus("[data-page-status]", "Could not read " + pair.pay.symbol + " allowance.", "warn");
+        return;
+      }
+      if (allowance < amountIn) {
+        batch.push(buildApproveTokenTransaction(pair.pay.address, kumbaya.swapRouter, amountIn));
+      }
+      batch.push(swapTx);
+
+      if (batch.length === 1) {
+        setStatus("[data-page-status]", "Simulating swap...", "warn");
+        try {
+          await simulateTransaction(swapTx, chain);
+        } catch (error) {
+          setStatus("[data-page-status]", "Swap preflight failed: " + simulationFailureMessage(error), "warn");
+          return;
+        }
+      }
+
+      setStatus("[data-page-status]", batch.length > 1 ? "Submitting approve + swap..." : "Submitting swap...", "warn");
+      txHash = await mossSendCalls(batch);
+    } else {
+      if (!(await ensureKumbayaApproval(chain, pair.pay, amountIn))) return;
+
+      setStatus("[data-page-status]", "Simulating swap...", "warn");
+      try {
+        await simulateTransaction(swapTx, chain);
+      } catch (error) {
+        setStatus("[data-page-status]", "Swap preflight failed: " + simulationFailureMessage(error), "warn");
+        return;
+      }
+
+      setStatus("[data-page-status]", "Submitting swap...", "warn");
+      txHash = await sendTransaction(swapTx, chain);
+    }
 
     setStatus("[data-page-status]", "Swap submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
     refreshSwapBalancesSoon();
@@ -2413,6 +2654,7 @@ import {
 
     setStatus("[data-page-status]", "Swap confirmed: " + txHash.slice(0, 10) + "...", "ok");
     loadSwapBalances();
+    loadSwapMarketPrices();
   }
 
   function tokenConfigForAddress(chain, address) {
@@ -4833,6 +5075,7 @@ import {
 
     updateContractLabels();
     renderSwapControls();
+    loadSwapMarketPrices();
 
     function onAssetChange(event) {
       var value = event.detail && event.detail.value ? event.detail.value : event.currentTarget.dataset.value;
@@ -4840,6 +5083,7 @@ import {
         swapUiState.quoteId = value;
       }
       renderSwapControls();
+      scheduleSwapQuote();
       window.setTimeout(loadSwapBalances, 0);
     }
 
@@ -4862,26 +5106,32 @@ import {
       }
     });
 
-    if (payInput && receiveInput) {
-      payInput.addEventListener("input", function () {
-        receiveInput.value = "";
-        updateSwapRouteLabels();
-      });
+    if (payInput) {
+      payInput.addEventListener("input", scheduleSwapQuote);
     }
+
+    $all("[data-slippage]").forEach(function (choice) {
+      choice.addEventListener("click", function () {
+        var bps = Math.round(parseFloat(choice.getAttribute("data-slippage")) * 100);
+        if (!isFinite(bps) || bps <= 0) return;
+        swapUiState.slippageBps = bps;
+        $all("[data-slippage]").forEach(function (other) {
+          other.classList.toggle("active", other === choice);
+        });
+      });
+    });
 
     if (flip) {
       flip.addEventListener("click", function () {
-        var payValue = payInput ? payInput.value : "";
-        var receiveValue = receiveInput ? receiveInput.value : "";
-
         swapUiState.reversed = !swapUiState.reversed;
         if (payInput) {
-          payInput.value = receiveValue;
+          payInput.value = "";
         }
         if (receiveInput) {
-          receiveInput.value = payValue;
+          receiveInput.value = "";
         }
         renderSwapControls();
+        clearSwapQuote();
         window.setTimeout(loadSwapBalances, 0);
       });
     }
@@ -4898,9 +5148,13 @@ import {
       if (!(await ensureSupportedNetwork("swapping"))) return;
 
       try {
-        await submitUniversalRouterSwap();
+        await submitKumbayaSwap();
       } catch (error) {
-        setStatus("[data-page-status]", "Swap transaction failed or was rejected.", "warn");
+        if (error && error.code === 4001) {
+          setStatus("[data-page-status]", "Swap was rejected in the wallet.", "warn");
+        } else {
+          setStatus("[data-page-status]", "Swap transaction failed: " + (error && error.message ? error.message : "unknown error"), "warn");
+        }
       }
     });
   }

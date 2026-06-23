@@ -627,6 +627,24 @@
         border-top: 1px solid var(--c-cloud-hairline);
       }
 
+      .market-readout {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 18px;
+        margin-top: 6px;
+        margin-bottom: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--c-cloud-hairline);
+      }
+
+      .market-cell .meta-label {
+        margin-bottom: 6px;
+      }
+
+      .market-cell .meta-value {
+        font-size: 13px;
+      }
+
       .meta-label {
         margin-bottom: 4px;
         color: var(--c-cloud-muted);
@@ -864,16 +882,22 @@
         <div>
           <h1 class="portal-title" id="swap-title">Atomic Exchange.</h1>
           <p class="portal-copy">
-            Contract-routed swap execution through configured market paths. Quotes, slippage, approvals,
-            and final calldata are prepared before wallet submission.
+            Routed through the Kumbaya V3 router on MegaETH. Quotes, slippage, approvals,
+            and final calldata are simulated before wallet submission.
           </p>
-          <div class="liquidity-warning" id="swap-liquidity-warning" role="status" aria-live="polite">
-            <span class="liquidity-warning-label">Trading Not Live</span>
-            <span>Liquidity has not been added yet, so swaps are unavailable.</span>
+          <div class="market-readout">
+            <div class="market-cell" title="Live ENTEN market price on Kumbaya">
+              <div class="meta-label">ENTEN / USDm</div>
+              <div class="meta-value teal" data-enten-price>--</div>
+            </div>
+            <div class="market-cell" title="USD value backing 1 ENTEN if redeemed">
+              <div class="meta-label">Redeem Backing</div>
+              <div class="meta-value" data-enten-backing>--</div>
+            </div>
           </div>
         </div>
 
-        <form class="swap-shell swap-panel-grid" aria-describedby="swap-liquidity-warning" data-swap-form>
+        <form class="swap-shell swap-panel-grid" data-swap-form>
           <div class="swap-stack">
             <div class="swap-field">
               <div class="field-head">
@@ -897,14 +921,14 @@
                   <div class="asset-picker" data-asset-picker>
                     <button class="asset-select" type="button" aria-label="Pay asset" aria-haspopup="listbox" aria-expanded="false" data-pay-asset data-pay-symbol>
                       <span class="token-orb pay" aria-hidden="true"></span>
-                      <span data-asset-symbol-label>USDC</span>
+                      <span data-asset-symbol-label>MEGA</span>
                       <svg class="asset-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                       </svg>
                     </button>
                     <div class="asset-menu" role="listbox" data-asset-menu hidden></div>
                   </div>
-                  <span class="asset-name" data-pay-name>USD Coin</span>
+                  <span class="asset-name" data-pay-name>Mega</span>
                 </div>
               </div>
             </div>
@@ -961,15 +985,15 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
               </div>
-              <div class="slippage-options" aria-hidden="true">
-                <button class="slippage-choice" type="button" tabindex="-1">0.1%</button>
-                <button class="slippage-choice active" type="button" tabindex="-1">0.5%</button>
-                <button class="slippage-choice" type="button" tabindex="-1">1.0%</button>
+              <div class="slippage-options">
+                <button class="slippage-choice" type="button" data-slippage="0.1">0.1%</button>
+                <button class="slippage-choice active" type="button" data-slippage="0.5">0.5%</button>
+                <button class="slippage-choice" type="button" data-slippage="1.0">1.0%</button>
               </div>
             </div>
 
-            <button class="swap-submit" type="submit" disabled aria-disabled="true" data-swap-submit>
-              Trading Not Live
+            <button class="swap-submit" type="submit" data-swap-submit>
+              Swap
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
               </svg>
@@ -978,16 +1002,16 @@
 
           <div class="swap-metrics">
             <div>
-              <div class="meta-label">Price Impact</div>
-              <div class="meta-value teal" data-price-label>&lt; 0.01%</div>
+              <div class="meta-label">Rate</div>
+              <div class="meta-value teal" data-price-label>Enter an amount for a live quote</div>
             </div>
             <div>
               <div class="meta-label">Route</div>
-              <div class="meta-value" data-route-label>Configured Route</div>
+              <div class="meta-value" data-route-label>Kumbaya</div>
             </div>
           </div>
 
-          <p class="notice" data-page-status>Trading is not live yet. Liquidity has not been added, so swaps are unavailable.</p>
+          <p class="notice" data-page-status>Enter an amount and connect a wallet to swap on Kumbaya.</p>
           <p class="wallet-debug" data-wallet-debug>Checking wallet provider...</p>
           <span hidden data-swap-address>Not configured</span>
         </form>
@@ -996,8 +1020,8 @@
       <footer class="portal-footer reveal active">
         <div class="footer-stats">
           <div>Gas: Wallet Estimated</div>
-          <div>Liquidity: Route Dependent</div>
-          <div>Router: Configured Endpoint</div>
+          <div>Liquidity: Kumbaya V3</div>
+          <div>Router: Kumbaya SwapRouter02</div>
         </div>
         <div>(C) 2026 Enten Protocol</div>
       </footer>
