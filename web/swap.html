@@ -567,6 +567,7 @@
 
       .slippage-options {
         display: flex;
+        flex-wrap: wrap;
         gap: 10px;
       }
 
@@ -581,6 +582,56 @@
       .slippage-choice.active {
         border-color: var(--c-gold);
         color: var(--c-gold);
+      }
+
+      .slippage-custom-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .slippage-custom {
+        width: 64px;
+        min-height: 26px;
+        padding: 0 16px 0 8px;
+        border: 1px solid var(--c-cloud-faint);
+        background: transparent;
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        outline: none;
+        transition: border-color 0.25s ease;
+      }
+
+      .slippage-custom::placeholder {
+        color: var(--c-cloud-muted);
+      }
+
+      .slippage-custom:focus,
+      .slippage-custom.active {
+        border-color: var(--c-gold);
+        color: var(--c-gold);
+      }
+
+      .slippage-custom-pct {
+        position: absolute;
+        right: 6px;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        pointer-events: none;
+      }
+
+      .swap-metric-wide {
+        grid-column: 1 / -1;
+      }
+
+      .meta-value.impact-warn {
+        color: var(--c-gold);
+      }
+
+      .meta-value.impact-danger {
+        color: #e0683f;
       }
 
       .swap-submit {
@@ -986,9 +1037,24 @@
                 </svg>
               </div>
               <div class="slippage-options">
-                <button class="slippage-choice" type="button" data-slippage="0.1">0.1%</button>
-                <button class="slippage-choice active" type="button" data-slippage="0.5">0.5%</button>
-                <button class="slippage-choice" type="button" data-slippage="1.0">1.0%</button>
+                <button class="slippage-choice" type="button" data-slippage="0.5">0.5%</button>
+                <button class="slippage-choice active" type="button" data-slippage="1.0">1.0%</button>
+                <button class="slippage-choice" type="button" data-slippage="3.0">3.0%</button>
+                <span class="slippage-custom-wrap">
+                  <input
+                    class="slippage-custom"
+                    type="number"
+                    inputmode="decimal"
+                    min="0.01"
+                    max="50"
+                    step="0.1"
+                    placeholder="Custom"
+                    autocomplete="off"
+                    aria-label="Custom slippage percent"
+                    data-slippage-custom
+                  >
+                  <span class="slippage-custom-pct" aria-hidden="true">%</span>
+                </span>
               </div>
             </div>
 
@@ -1006,6 +1072,10 @@
               <div class="meta-value teal" data-price-label>Enter an amount for a live quote</div>
             </div>
             <div>
+              <div class="meta-label">Price Impact</div>
+              <div class="meta-value" data-impact-label>--</div>
+            </div>
+            <div class="swap-metric-wide">
               <div class="meta-label">Route</div>
               <div class="meta-value" data-route-label>Kumbaya</div>
             </div>

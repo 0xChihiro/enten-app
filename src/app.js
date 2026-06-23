@@ -410,7 +410,7 @@ import {
   var swapUiState = {
     reversed: false,
     quoteId: "MEGA",
-    slippageBps: 50,
+    slippageBps: 100,
     lastQuote: null
   };
   var swapQuoteTimer = null;
@@ -2444,12 +2444,59 @@ import {
     setText("[data-price-label]", rate);
   }
 
+  // Price impact for the trade: how far the realized rate sits below the near-spot
+  // rate, found by quoting a small reference amount (1/100th) through the SAME path.
+  // On these thin pools impact is usually the dominant cost, so it's worth showing.
+  async function computePriceImpactBps(chain, best, amountIn) {
+    var kumbaya = kumbayaConfig(chain);
+    var probeIn = amountIn / 100n;
+    if (!kumbaya || !isAddress(kumbaya.quoterV2) || probeIn <= 0n) return null;
+
+    var spot;
+    try {
+      spot = await publicClientForChain(chain).readContract({
+        address: kumbaya.quoterV2,
+        abi: QUOTER_V2_ABI,
+        functionName: "quoteExactInput",
+        args: [encodeV3Path(best.tokens, best.fees), probeIn]
+      });
+    } catch (error) {
+      return null;
+    }
+
+    var spotOut = Array.isArray(spot) ? BigInt(spot[0] || 0) : BigInt(spot || 0);
+    if (spotOut <= 0n) return null;
+
+    // impact = 1 - (execRate / spotRate); execRate = out/amountIn, spotRate = spotOut/probeIn.
+    var bps = 10000n - (best.amountOut * probeIn * 10000n) / (amountIn * spotOut);
+    return bps < 0n ? 0n : bps;
+  }
+
+  function renderPriceImpact(bps) {
+    $all("[data-impact-label]").forEach(function (node) {
+      node.classList.remove("teal", "impact-warn", "impact-danger");
+      if (bps === null || bps === undefined) {
+        node.textContent = "--";
+        return;
+      }
+      node.textContent = (Number(bps) / 100).toFixed(2) + "%";
+      if (bps >= 1500n) {
+        node.classList.add("impact-danger");
+      } else if (bps >= 500n) {
+        node.classList.add("impact-warn");
+      } else {
+        node.classList.add("teal");
+      }
+    });
+  }
+
   function clearSwapQuote() {
     swapUiState.lastQuote = null;
     var receiveInput = $("[data-receive-input]");
     if (receiveInput) receiveInput.value = "";
     updateSwapRouteLabels();
     setText("[data-price-label]", "Enter an amount for a live quote");
+    renderPriceImpact(null);
   }
 
   // Debounced live quote driven by the pay input. Caches the winning route so the
@@ -2492,12 +2539,19 @@ import {
     if (!best) {
       if (receiveInput) receiveInput.value = "";
       setText("[data-price-label]", "No route for this size");
+      renderPriceImpact(null);
       return;
     }
 
     swapUiState.lastQuote = { best: best, amountIn: amountIn, payId: payId, receiveId: receiveId };
     if (receiveInput) receiveInput.value = formatUnits(best.amountOut, pair.receive.decimals, 6);
     renderSwapQuoteMeta(chain, pair, amountIn, best);
+
+    var impactBps = await computePriceImpactBps(chain, best, amountIn);
+    // Guard against a token switch/flip landing while the probe was in flight.
+    var afterProbe = currentSwapTokens(activeSwapChainConfig());
+    if (tokenId(afterProbe.pay) !== payId || tokenId(afterProbe.receive) !== receiveId) return;
+    renderPriceImpact(impactBps);
   }
 
   async function ensureKumbayaApproval(chain, payToken, amountIn) {
@@ -5110,6 +5164,8 @@ import {
       payInput.addEventListener("input", scheduleSwapQuote);
     }
 
+    var slippageCustom = $("[data-slippage-custom]");
+
     $all("[data-slippage]").forEach(function (choice) {
       choice.addEventListener("click", function () {
         var bps = Math.round(parseFloat(choice.getAttribute("data-slippage")) * 100);
@@ -5118,8 +5174,37 @@ import {
         $all("[data-slippage]").forEach(function (other) {
           other.classList.toggle("active", other === choice);
         });
+        if (slippageCustom) {
+          slippageCustom.value = "";
+          slippageCustom.classList.remove("active");
+        }
       });
     });
+
+    if (slippageCustom) {
+      slippageCustom.addEventListener("input", function () {
+        var pct = parseFloat(slippageCustom.value);
+        if (!isFinite(pct) || pct <= 0) {
+          // Empty / invalid: fall back to whichever preset is highlighted.
+          slippageCustom.classList.remove("active");
+          var active = $("[data-slippage].active");
+          if (active) {
+            swapUiState.slippageBps = Math.round(parseFloat(active.getAttribute("data-slippage")) * 100);
+          }
+          return;
+        }
+        // Cap at 50% so a fat-fingered value can't set a near-zero floor.
+        if (pct > 50) {
+          pct = 50;
+          slippageCustom.value = "50";
+        }
+        swapUiState.slippageBps = Math.round(pct * 100);
+        slippageCustom.classList.add("active");
+        $all("[data-slippage]").forEach(function (other) {
+          other.classList.remove("active");
+        });
+      });
+    }
 
     if (flip) {
       flip.addEventListener("click", function () {
