@@ -150,6 +150,23 @@
         text-transform: uppercase;
       }
 
+      .telegram-diagnostic-output {
+        margin-top: 12px;
+        border: 1px solid var(--c-cloud-hairline);
+        background: rgba(244, 244, 242, 0.025);
+        color: rgba(244, 244, 242, 0.56);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0;
+        line-height: 1.5;
+        max-height: 120px;
+        overflow: auto;
+        padding: 10px;
+        text-transform: none;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
       .wallet-actions {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -323,7 +340,10 @@
               <div class="telegram-diagnostics">
                 <div data-passkey-support>Passkey support: checking</div>
                 <div data-telegram-platform>Platform: browser</div>
+                <div data-platform-authenticator>Platform authenticator: checking</div>
+                <div data-last-moss-error>Last MOSS error: none</div>
               </div>
+              <pre class="telegram-diagnostic-output" data-diagnostic-output hidden></pre>
             </div>
             <button class="connect-button" type="button" data-telegram-connect-moss>Connect MOSS</button>
           </div>
@@ -340,6 +360,10 @@
             <button class="wallet-action browser-fallback" type="button" data-open-browser hidden>
               <span class="wallet-action-name">Open Browser</span>
               <span class="wallet-action-sub">Use passkeys outside Telegram</span>
+            </button>
+            <button class="wallet-action" type="button" data-copy-diagnostics>
+              <span class="wallet-action-name">Copy Diagnostics</span>
+              <span class="wallet-action-sub">Inspect iOS WebAuthn state</span>
             </button>
             <button class="wallet-action" type="button" data-wallet-deposit>
               <span class="wallet-action-name">Deposit</span>
@@ -380,10 +404,29 @@
         var connectMoss = document.querySelector("[data-telegram-connect-moss]");
         var signMessage = document.querySelector("[data-telegram-sign-message]");
         var callContract = document.querySelector("[data-telegram-call-contract]");
+        var copyDiagnostics = document.querySelector("[data-copy-diagnostics]");
+        var platformAuthenticator = document.querySelector("[data-platform-authenticator]");
+        var lastMossError = document.querySelector("[data-last-moss-error]");
+        var diagnosticOutput = document.querySelector("[data-diagnostic-output]");
         var status = document.querySelector("[data-page-status]");
+        var lastError = "";
 
         function setStatus(message) {
           if (status) status.textContent = message;
+        }
+
+        function describeError(error) {
+          if (!error) return "";
+          return [
+            error.name || "Error",
+            error.message || String(error),
+            error.code ? "code=" + error.code : ""
+          ].filter(Boolean).join(" / ");
+        }
+
+        function setMossError(error) {
+          lastError = describeError(error);
+          if (lastMossError) lastMossError.textContent = "Last MOSS error: " + (lastError || "none");
         }
 
         function entenMoss() {
@@ -406,6 +449,35 @@
           return window.location.href.split("#")[0];
         }
 
+        function isIos() {
+          return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        }
+
+        function diagnosticsPayload() {
+          return {
+            url: currentUrl(),
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            maxTouchPoints: navigator.maxTouchPoints,
+            iosDetected: isIos(),
+            secureContext: window.isSecureContext,
+            hasCredentialsApi: Boolean(navigator.credentials),
+            hasPublicKeyCredential: Boolean(window.PublicKeyCredential),
+            topLevelWindow: window.top === window,
+            telegramDetected: Boolean(webApp),
+            telegramPlatform: webApp && webApp.platform,
+            telegramVersion: webApp && webApp.version,
+            lastMossError: lastError || null
+          };
+        }
+
+        function renderDiagnostics() {
+          if (!diagnosticOutput) return;
+          diagnosticOutput.hidden = false;
+          diagnosticOutput.textContent = JSON.stringify(diagnosticsPayload(), null, 2);
+        }
+
         function setPasskeyDiagnostics() {
           var hasCredentials = Boolean(navigator.credentials);
           var hasPublicKeyCredential = Boolean(window.PublicKeyCredential);
@@ -417,6 +489,25 @@
               " / " +
               (hasCredentials && hasPublicKeyCredential ? "WebAuthn visible" : "WebAuthn unavailable");
           }
+
+          if (window.PublicKeyCredential && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function") {
+            PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+              .then(function (available) {
+                if (platformAuthenticator) {
+                  platformAuthenticator.textContent = "Platform authenticator: " + (available ? "available" : "unavailable");
+                }
+                renderDiagnostics();
+              })
+              .catch(function (error) {
+                if (platformAuthenticator) platformAuthenticator.textContent = "Platform authenticator: check failed";
+                setMossError(error);
+                renderDiagnostics();
+              });
+          } else if (platformAuthenticator) {
+            platformAuthenticator.textContent = "Platform authenticator: API unavailable";
+          }
+
+          renderDiagnostics();
         }
 
         function applyInsets(insets) {
@@ -439,7 +530,9 @@
           waitForMoss(function (moss) {
             if (typeof moss.initialise !== "function") return;
             moss.initialise().catch(function (error) {
+              setMossError(error);
               setStatus("MOSS initialisation failed: " + (error && error.message ? error.message : String(error)));
+              renderDiagnostics();
             });
           }, 40);
         }
@@ -484,7 +577,9 @@
                 setStatus("MOSS connected: " + result.address);
               })
               .catch(function (error) {
+                setMossError(error);
                 setStatus("MOSS connect failed: " + (error && error.message ? error.message : String(error)));
+                renderDiagnostics();
               })
               .finally(function () {
                 connectMoss.disabled = false;
@@ -507,7 +602,9 @@
                 setStatus("MOSS signature approved.");
               })
               .catch(function (error) {
+                setMossError(error);
                 setStatus("MOSS signature failed: " + (error && error.message ? error.message : String(error)));
+                renderDiagnostics();
               })
               .finally(function () {
                 signMessage.disabled = false;
@@ -532,8 +629,28 @@
             //   value: "0"
             // });
             moss.callContractPlaceholder().catch(function (error) {
+              setMossError(error);
               setStatus(error && error.message ? error.message : String(error));
+              renderDiagnostics();
             });
+          });
+        }
+
+        if (copyDiagnostics) {
+          copyDiagnostics.addEventListener("click", function () {
+            var text = JSON.stringify(diagnosticsPayload(), null, 2);
+            renderDiagnostics();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text)
+                .then(function () {
+                  setStatus("Diagnostics copied.");
+                })
+                .catch(function () {
+                  setStatus("Diagnostics shown below.");
+                });
+            } else {
+              setStatus("Diagnostics shown below.");
+            }
           });
         }
 
