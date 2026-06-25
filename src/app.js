@@ -440,6 +440,8 @@ import {
     redemptionProceeds: null,
     priceCompareRequestId: 0,
     vaultAddress: "",
+    kernelAddress: "",
+    constantsKey: "",
     registeredAssets: [],
     totalMinted: null
   };
@@ -1806,7 +1808,10 @@ import {
   function normalizeAssetItems(items) {
     return (items || [])
       .map(function (item) {
-        var address = item && (item.address || item.token || item[0]);
+        // Solidity returns these tuples as `(address asset, uint256 amount)`, so viem
+        // decodes the address under the `asset` key — check it alongside the other
+        // shapes (`address`/`token`/positional) the app's various ABIs produce.
+        var address = item && (item.address || item.asset || item.token || item[0]);
         var amount = item && (item.amount !== undefined ? item.amount : item[1]);
 
         if (!isAddress(address)) return null;
@@ -1816,6 +1821,46 @@ import {
         };
       })
       .filter(Boolean);
+  }
+
+  // Runs a batch of reads as a single multicall, falling back to parallel individual
+  // reads only if the chain has no multicall3. Returns an object keyed by each call's
+  // `key`, with `normalize` applied to successful results (null on failure). Lets
+  // callers fold many contract reads (across different contracts) into one round-trip.
+  async function multicallWithFallback(client, calls) {
+    var results = {};
+
+    function assign(call, value, ok) {
+      results[call.key] = ok ? (call.normalize ? call.normalize(value) : value) : null;
+    }
+
+    try {
+      var batched = await client.multicall({
+        allowFailure: true,
+        contracts: calls.map(function (call) {
+          return { address: call.address, abi: call.abi, functionName: call.functionName, args: call.args };
+        })
+      });
+      batched.forEach(function (res, index) {
+        assign(calls[index], res && res.result, res && res.status === "success");
+      });
+    } catch (error) {
+      await Promise.all(
+        calls.map(async function (call) {
+          try {
+            assign(
+              call,
+              await client.readContract({ address: call.address, abi: call.abi, functionName: call.functionName, args: call.args }),
+              true
+            );
+          } catch (innerError) {
+            assign(call, null, false);
+          }
+        })
+      );
+    }
+
+    return results;
   }
 
   function hexToUtf8(hex) {
@@ -3374,6 +3419,11 @@ import {
     return payment ? payment.amount : null;
   }
 
+  // Inverts quote(): given an exact `spend` of `asset`, find the largest ENTEN amount
+  // whose payment stays within budget. Payment is monotonic and dominated by the linear
+  // floor term, so we seed from the live spot price and refine with a proportional
+  // (secant) step — amount *= spend / payment — which converges in 1-3 quote() reads
+  // instead of the ~50 sequential bisection probes this used to do.
   async function estimateAuctionMintForSpend(chain, spend, asset) {
     var mintDecimals = auctionUiState.mintDecimals;
     var scale = 10n ** BigInt(mintDecimals);
@@ -3381,53 +3431,43 @@ import {
       return item.address && item.address.toLowerCase() === String(asset || "").toLowerCase();
     });
     var remaining = auctionUiState.remainingLot;
-    var lo = 0n;
-    var hi;
-    var mid;
+    var amount;
+    var best = null;
     var quote;
     var payment;
-    var iterations = 0;
+    var next;
+    var iterations;
 
     if (!chain || !auctionAddress(chain) || spend <= 0n || !isAddress(asset)) return null;
     if (remaining === null || remaining <= 0n) return null;
 
-    hi = remaining;
-    if (price && price.amount > 0n) {
-      hi = ceilDivBig(spend * scale, price.amount);
-      if (hi <= 0n) hi = 1n;
-      if (hi > remaining) hi = remaining;
-    }
+    amount = price && price.amount > 0n ? (spend * scale) / price.amount : remaining / 2n;
+    if (amount <= 0n) amount = 1n;
+    if (amount > remaining) amount = remaining;
 
-    while (hi < remaining && iterations < 8) {
-      quote = await readAuctionQuote(chain, hi);
+    for (iterations = 0; iterations < 7; iterations += 1) {
+      quote = await readAuctionQuote(chain, amount);
       payment = paymentForAsset(quote.payments, asset);
-      if (payment === null || payment > spend) break;
-      lo = hi;
-      hi = hi * 2n;
-      if (hi > remaining) hi = remaining;
-      iterations += 1;
-    }
+      if (payment === null || payment <= 0n) break;
 
-    quote = await readAuctionQuote(chain, hi);
-    payment = paymentForAsset(quote.payments, asset);
-    if (payment !== null && payment <= spend) {
-      return { amount: hi, quote: quote };
-    }
-
-    for (iterations = 0; iterations < 44 && lo + 1n < hi; iterations += 1) {
-      mid = (lo + hi) / 2n;
-      quote = await readAuctionQuote(chain, mid);
-      payment = paymentForAsset(quote.payments, asset);
-      if (payment !== null && payment <= spend) {
-        lo = mid;
-      } else {
-        hi = mid;
+      if (payment <= spend) {
+        // Keep the largest in-budget amount seen; stop once we're within 0.05% of it.
+        if (!best || amount > best.amount) best = { amount: amount, quote: quote };
+        if ((spend - payment) * 10000n / spend <= 5n) break;
       }
+
+      next = (amount * spend) / payment;
+      if (next <= 0n) next = 1n;
+      if (next > remaining) next = remaining;
+      if (next === amount) {
+        // Escape an integer-rounding fixed point.
+        next = payment < spend ? amount + 1n : amount - 1n;
+        if (next <= 0n) break;
+      }
+      amount = next;
     }
 
-    if (lo <= 0n) return null;
-    quote = await readAuctionQuote(chain, lo);
-    return { amount: lo, quote: quote };
+    return best;
   }
 
   function setAuctionInputMode(mode) {
@@ -3470,8 +3510,24 @@ import {
     var container = $("[data-auction-exact-inputs]");
     var assets = auctionPaymentAssets(chain);
     var previousValues = {};
+    var existing;
 
     if (!container) return;
+
+    // The live data refresh calls this every few seconds. Rebuilding the inputs each
+    // time would wipe the user's in-progress typing and focus, so bail out when the
+    // asset set hasn't actually changed.
+    existing = $all("[data-auction-exact-input]").map(function (node) {
+      return String(node.getAttribute("data-auction-exact-input") || "").toLowerCase();
+    });
+    if (
+      existing.length === assets.length &&
+      existing.every(function (addr, index) { return addr === String(assets[index] || "").toLowerCase(); })
+    ) {
+      container.hidden = auctionInputMode() !== "spend";
+      return;
+    }
+
     $all("[data-auction-exact-input]").forEach(function (existingInput) {
       var asset = existingInput.getAttribute("data-auction-exact-input");
       if (isAddress(asset)) previousValues[asset.toLowerCase()] = existingInput.value;
@@ -3483,6 +3539,7 @@ import {
       var label = document.createElement("div");
       var wrap = document.createElement("div");
       var input = document.createElement("input");
+      var maxButton = document.createElement("button");
       var unit = document.createElement("span");
       var symbol = auctionAssetSymbol(chain, asset);
 
@@ -3499,9 +3556,18 @@ import {
       input.value = previousValues[String(asset).toLowerCase()] || "";
       input.setAttribute("aria-label", "Exact input amount in " + symbol);
       input.setAttribute("data-auction-exact-input", asset);
+      maxButton.type = "button";
+      maxButton.className = "amount-max";
+      maxButton.textContent = "Max";
+      maxButton.setAttribute("data-auction-exact-max", asset);
+      maxButton.setAttribute("aria-label", "Use full " + symbol + " wallet balance");
+      maxButton.addEventListener("click", function () {
+        setAuctionExactInputToMax(asset, input);
+      });
       unit.className = "amount-unit";
       unit.textContent = symbol;
       wrap.appendChild(input);
+      wrap.appendChild(maxButton);
       wrap.appendChild(unit);
       row.appendChild(label);
       row.appendChild(wrap);
@@ -3512,6 +3578,33 @@ import {
     $all("[data-auction-exact-input]").forEach(function (input) {
       input.addEventListener("input", updateAuctionPaymentPreview);
     });
+  }
+
+  // Fills an exact-input field with the connected wallet's full balance of that asset.
+  async function setAuctionExactInputToMax(asset, input) {
+    var chain = activeAuctionChainConfig();
+    var symbol = auctionAssetSymbol(chain, asset);
+    var balance;
+
+    if (!input || !isAddress(asset)) return;
+    if (!state.account && !(await connectWallet())) return;
+    if (!(await ensureAuctionNetwork("reading your " + symbol + " balance"))) return;
+
+    try {
+      balance = await tokenBalance(asset, state.account, currentChainConfig() || chain);
+    } catch (error) {
+      setStatus("[data-page-status]", "Could not read your " + symbol + " balance.", "warn");
+      return;
+    }
+
+    if (balance === null || balance === undefined || BigInt(balance) <= 0n) {
+      setStatus("[data-page-status]", "No " + symbol + " balance available to spend.", "warn");
+      return;
+    }
+
+    // formatUnits truncates, so the filled value never rounds above the real balance.
+    input.value = formatUnits(BigInt(balance), auctionAssetDecimals(chain, asset), 6);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   function updateAuctionPaymentPreview() {
@@ -3537,7 +3630,11 @@ import {
     setText("[data-auction-secondary-estimate]", "");
 
     if (input && input.value) {
-      amount = parseUnits(input.value, decimals);
+      try {
+        amount = parseUnits(input.value, decimals);
+      } catch (error) {
+        amount = 0n;
+      }
     }
 
     if (amount <= 0n) {
@@ -3577,6 +3674,7 @@ import {
       auctionUiState.lastQuote = { amount: amount, payments: quote.payments };
       quotedEstimate = paymentEstimateText(chain, quote.payments);
       setAuctionPreviewText(quotedEstimate);
+      setText("[data-auction-secondary-estimate]", "Price: " + effectiveUnitPriceText(chain, quote.payments, amount));
     }, 250);
   }
 
@@ -3584,21 +3682,29 @@ import {
     var input = activeAuctionExactInput();
     var asset = input ? input.getAttribute("data-auction-exact-input") : "";
     var decimals = auctionAssetDecimals(chain, asset);
-    var spend = input && input.value ? parseUnits(input.value, decimals) : 0n;
+    var spend = 0n;
     var requestId;
+
+    if (input && input.value) {
+      try {
+        spend = parseUnits(input.value, decimals);
+      } catch (error) {
+        spend = 0n;
+      }
+    }
 
     auctionUiState.lastQuote = null;
     auctionUiState.derivedMintAmount = null;
     auctionUiState.derivedQuote = null;
 
     if (!spend || spend <= 0n) {
-      setAuctionPreviewText("Estimated spend: --");
+      setText("[data-auction-payment-estimate]", "Est. output: --");
       setText("[data-auction-secondary-estimate]", "");
       return;
     }
 
     if (!chain || !auctionAddress(chain) || !isAddress(asset)) {
-      setAuctionPreviewText("Estimated spend unavailable");
+      setText("[data-auction-payment-estimate]", "Est. output: unavailable");
       setText("[data-auction-secondary-estimate]", "");
       return;
     }
@@ -3606,21 +3712,20 @@ import {
     requestId = ++auctionUiState.quoteRequestId;
     auctionUiState.quoteTimer = window.setTimeout(async function () {
       var result;
-      var estimate;
       var entenSym = entenSymbolFor(chain);
 
       try {
         result = await estimateAuctionMintForSpend(chain, spend, asset);
       } catch (error) {
         if (requestId !== auctionUiState.quoteRequestId) return;
-        setAuctionPreviewText("Estimated spend unavailable");
+        setText("[data-auction-payment-estimate]", "Est. output: unavailable");
         setText("[data-auction-secondary-estimate]", "Could not derive ENTEN output from exact input");
         return;
       }
 
       if (requestId !== auctionUiState.quoteRequestId) return;
       if (!result || !result.amount || result.amount <= 0n) {
-        setAuctionPreviewText("Estimated spend: --");
+        setText("[data-auction-payment-estimate]", "Est. output: --");
         setText("[data-auction-secondary-estimate]", "Amount too small to receive " + entenSym);
         return;
       }
@@ -3637,12 +3742,10 @@ import {
       });
 
       setText(
-        "[data-auction-payment-total]",
-        groupedNumber(formatUnits(result.amount, auctionUiState.mintDecimals, 6)) + " " + entenSym
+        "[data-auction-payment-estimate]",
+        "Est. output: " + groupedNumber(formatUnits(result.amount, auctionUiState.mintDecimals, 6)) + " " + entenSym
       );
-      estimate = paymentEstimateText(chain, result.quote.payments);
-      setText("[data-auction-payment-estimate]", estimate);
-      setText("[data-auction-secondary-estimate]", "Required inputs: " + paymentEstimateValueText(estimate));
+      setText("[data-auction-secondary-estimate]", "Price: " + effectiveUnitPriceText(chain, result.quote.payments, result.amount));
     }, 250);
   }
 
@@ -4128,6 +4231,24 @@ import {
       .join(" + ");
   }
 
+  // Effective unit price for an auction trade: the per-asset amount paid (buy) or
+  // received (sell) per 1 ENTEN, e.g. "0.502 USDm / ENTEN" (or "... + ..." per asset).
+  function effectiveUnitPriceText(chain, items, entenAmount) {
+    var scale = 10n ** BigInt(auctionUiState.mintDecimals);
+    var parts;
+
+    if (!entenAmount || entenAmount <= 0n) return "--";
+    parts = (items || [])
+      .filter(function (item) { return item.amount > 0n; })
+      .map(function (item) {
+        var perEnten = (item.amount * scale) / entenAmount;
+        var display = assetDisplay(chain, { address: item.address, amount: perEnten }, 6);
+        return display.value + " " + display.unit;
+      });
+
+    return parts.length ? parts.join(" + ") + " / ENTEN" : "--";
+  }
+
   function updateAuctionSellPreview() {
     var chain = activeAuctionChainConfig();
     var input = $("[data-auction-sell-input]");
@@ -4142,20 +4263,27 @@ import {
     auctionUiState.redemptionProceeds = null;
 
     if (input && input.value) {
-      amount = parseUnits(input.value, auctionUiState.mintDecimals);
+      try {
+        amount = parseUnits(input.value, auctionUiState.mintDecimals);
+      } catch (error) {
+        amount = 0n;
+      }
     }
 
     if (amount <= 0n) {
       setText("[data-auction-sell-proceeds]", "You receive: --");
+      setText("[data-auction-sell-price]", "");
       return;
     }
 
     if (!chain || !auctionAddress(chain)) {
       setText("[data-auction-sell-proceeds]", "You receive: unavailable");
+      setText("[data-auction-sell-price]", "");
       return;
     }
 
     setText("[data-auction-sell-proceeds]", "You receive: ...");
+    setText("[data-auction-sell-price]", "");
     requestId = ++auctionUiState.sellQuoteRequestId;
     auctionUiState.sellQuoteTimer = window.setTimeout(async function () {
       var proceeds;
@@ -4165,12 +4293,14 @@ import {
       } catch (error) {
         if (requestId !== auctionUiState.sellQuoteRequestId) return;
         setText("[data-auction-sell-proceeds]", "You receive: unavailable");
+        setText("[data-auction-sell-price]", "");
         return;
       }
 
       if (requestId !== auctionUiState.sellQuoteRequestId) return;
       auctionUiState.redemptionProceeds = { amount: amount, proceeds: proceeds };
       setText("[data-auction-sell-proceeds]", "You receive: " + formatReceiptsList(chain, proceeds));
+      setText("[data-auction-sell-price]", "Price: " + effectiveUnitPriceText(chain, proceeds, amount));
     }, 250);
   }
 
@@ -5158,10 +5288,14 @@ import {
     var address = auctionAddress(chain);
     var client;
     var calls;
-    var results = {};
-    var reserveItems = [];
+    var results;
     var minReserve = null;
+    var mintDecimals;
     var vaultAddress;
+    var kernelAddress;
+    var constantsKey;
+    var assets;
+    var backing;
 
     if (!chain || !auction || !address) {
       auctionUiState.remainingLot = null;
@@ -5178,83 +5312,79 @@ import {
       return;
     }
 
+    mintDecimals = auction.mintDecimals === undefined ? 18 : auction.mintDecimals;
+    client = publicClientForChain(chain);
+
+    // Registered assets, vault and kernel are immutable per contract. Resolve them once
+    // and cache: assets come from a single read, vault/kernel come straight from config
+    // (with a controller-derived fallback) so they cost no reads at all on the main chain.
+    constantsKey = chain.chainId + ":" + String(address).toLowerCase();
+    if (auctionUiState.constantsKey !== constantsKey || !auctionUiState.registeredAssets.length) {
+      var setup = await multicallWithFallback(client, [
+        { key: "assets", address: address, abi: AUCTION_ABI, functionName: "registeredAssets" }
+      ]);
+      auctionUiState.registeredAssets = Array.isArray(setup.assets) ? setup.assets.filter(isAddress) : [];
+
+      vaultAddress = (auction && auction.vaultAddress) || "";
+      kernelAddress = swapKernelAddress(chain) || "";
+      if (!isAddress(vaultAddress) || !isAddress(kernelAddress)) {
+        try {
+          var controller = await client.readContract({ address: address, abi: AUCTION_ABI, functionName: "CONTROLLER" });
+          if (isAddress(controller)) {
+            var derived = await multicallWithFallback(client, [
+              { key: "vault", address: controller, abi: CONTROLLER_VIEW_ABI, functionName: "VAULT" },
+              { key: "kernel", address: controller, abi: CONTROLLER_VIEW_ABI, functionName: "KERNEL" }
+            ]);
+            if (!isAddress(vaultAddress) && isAddress(derived.vault)) vaultAddress = derived.vault;
+            if (!isAddress(kernelAddress) && isAddress(derived.kernel)) kernelAddress = derived.kernel;
+          }
+        } catch (controllerError) {
+          // Leave unresolved; the backing readout just won't populate this cycle.
+        }
+      }
+
+      auctionUiState.vaultAddress = isAddress(vaultAddress) ? vaultAddress : "";
+      auctionUiState.kernelAddress = isAddress(kernelAddress) ? kernelAddress : "";
+      auctionUiState.constantsKey = constantsKey;
+    }
+
+    assets = auctionUiState.registeredAssets || [];
+    vaultAddress = auctionUiState.vaultAddress;
+    kernelAddress = auctionUiState.kernelAddress;
+
+    // One multicall per refresh: live price, market state, per-asset reserves, vault
+    // backing balances and per-asset borrowed state — folded into a single round-trip.
     calls = [
       { key: "price", address: address, abi: AUCTION_ABI, functionName: "getPrices", normalize: normalizeAssetItems },
       { key: "start", address: address, abi: AUCTION_ABI, functionName: "startTime" },
-      { key: "totalMinted", address: address, abi: AUCTION_ABI, functionName: "totalMinted" },
-      { key: "assets", address: address, abi: AUCTION_ABI, functionName: "registeredAssets" },
-      { key: "halfLife", address: address, abi: AUCTION_ABI, functionName: "HALF_LIFE" },
-      { key: "resetThreshold", address: address, abi: AUCTION_ABI, functionName: "RESET_THRESHOLD_BPS" },
-      { key: "resetTarget", address: address, abi: AUCTION_ABI, functionName: "RESET_TARGET_BPS" },
-      { key: "minPremium", address: address, abi: AUCTION_ABI, functionName: "MIN_PREMIUM_BPS" },
-      { key: "controller", address: address, abi: AUCTION_ABI, functionName: "CONTROLLER" }
+      { key: "totalMinted", address: address, abi: AUCTION_ABI, functionName: "totalMinted" }
     ];
-
-    client = publicClientForChain(chain);
-
-    try {
-      var multicallResults = await client.multicall({
-        allowFailure: true,
-        contracts: calls.map(function (call) {
-          return {
-            address: call.address,
-            abi: call.abi,
-            functionName: call.functionName
-          };
-        })
+    assets.forEach(function (asset) {
+      calls.push({ key: "reserve:" + asset.toLowerCase(), address: address, abi: AUCTION_ABI, functionName: "reserveOf", args: [asset] });
+    });
+    if (isAddress(vaultAddress)) {
+      calls.push({ key: "backing", address: vaultAddress, abi: VAULT_ABI, functionName: "backingBalances", normalize: normalizeAssetItems });
+    }
+    if (isAddress(kernelAddress)) {
+      assets.forEach(function (asset) {
+        calls.push({ key: "view:" + asset.toLowerCase(), address: kernelAddress, abi: KERNEL_VIEW_ABI, functionName: "viewData", args: [backingStateSlots(asset)] });
       });
-      multicallResults.forEach(function (result, index) {
-        if (result && result.status === "success") {
-          results[calls[index].key] = calls[index].normalize ? calls[index].normalize(result.result) : result.result;
-        } else {
-          results[calls[index].key] = null;
-        }
-      });
-    } catch (error) {
-      await Promise.all(
-        calls.map(async function (call) {
-          try {
-            var value = await client.readContract({
-              address: call.address,
-              abi: call.abi,
-              functionName: call.functionName
-            });
-            results[call.key] = call.normalize ? call.normalize(value) : value;
-          } catch (innerError) {
-            results[call.key] = null;
-          }
-        })
-      );
     }
 
+    results = await multicallWithFallback(client, calls);
+
     auctionUiState.prices = results.price || [];
-    auctionUiState.mintDecimals = auction.mintDecimals === undefined ? 18 : auction.mintDecimals;
+    auctionUiState.mintDecimals = mintDecimals;
     auctionUiState.chainId = chain.chainId;
-    auctionUiState.registeredAssets = Array.isArray(results.assets) ? results.assets.filter(isAddress) : [];
     auctionUiState.totalMinted = results.totalMinted === null || results.totalMinted === undefined ? null : BigInt(results.totalMinted);
     renderAuctionSpendAssetOptions(chain);
 
-    if (auctionUiState.registeredAssets.length) {
-      try {
-        var reserveResults = await client.multicall({
-          allowFailure: true,
-          contracts: auctionUiState.registeredAssets.map(function (asset) {
-            return { address: address, abi: AUCTION_ABI, functionName: "reserveOf", args: [asset] };
-          })
-        });
-        reserveItems = reserveResults
-          .map(function (result, index) {
-            if (!result || result.status !== "success") return null;
-            return { address: auctionUiState.registeredAssets[index], amount: BigInt(result.result || 0) };
-          })
-          .filter(Boolean);
-      } catch (error) {
-        reserveItems = [];
-      }
-    }
-
-    reserveItems.forEach(function (item) {
-      if (minReserve === null || item.amount < minReserve) minReserve = item.amount;
+    assets.forEach(function (asset) {
+      var raw = results["reserve:" + asset.toLowerCase()];
+      var amount;
+      if (raw === null || raw === undefined) return;
+      amount = BigInt(raw);
+      if (minReserve === null || amount < minReserve) minReserve = amount;
     });
 
     setAssetMetric("[data-auction-currentPrice]", "[data-auction-currentPrice-unit]", chain, results.price, "--", "");
@@ -5273,7 +5403,7 @@ import {
 
     if (minReserve !== null && minReserve > 0n) {
       auctionUiState.remainingLot = minReserve - 1n;
-      setText("[data-auction-amountLeft]", formatUnitsCompact(auctionUiState.remainingLot, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
+      setText("[data-auction-amountLeft]", formatUnitsCompact(auctionUiState.remainingLot, mintDecimals));
       setText("[data-auction-amountLeft-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
     } else {
       auctionUiState.remainingLot = null;
@@ -5282,74 +5412,26 @@ import {
     }
 
     if (auctionUiState.totalMinted !== null) {
-      setText("[data-auction-tokensSold]", formatUnitsCompact(auctionUiState.totalMinted, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
+      setText("[data-auction-tokensSold]", formatUnitsCompact(auctionUiState.totalMinted, mintDecimals));
       setText("[data-auction-tokensSold-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
-      setText("[data-auction-epochAllocation]", formatUnitsCompact(auctionUiState.totalMinted, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
+      setText("[data-auction-epochAllocation]", formatUnitsCompact(auctionUiState.totalMinted, mintDecimals));
       setText("[data-auction-epochAllocation-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
     }
 
-    vaultAddress = auctionUiState.vaultAddress || (auction && auction.vaultAddress);
-    if (!isAddress(vaultAddress) && isAddress(results.controller)) {
-      try {
-        vaultAddress = await client.readContract({
-          address: results.controller,
-          abi: CONTROLLER_VIEW_ABI,
-          functionName: "VAULT"
-        });
-        auctionUiState.vaultAddress = isAddress(vaultAddress) ? vaultAddress : "";
-      } catch (error) {
-        vaultAddress = "";
-      }
-    }
-
-    if (isAddress(vaultAddress)) {
-      try {
-        var backing = normalizeAssetItems(
-          await client.readContract({ address: vaultAddress, abi: VAULT_ABI, functionName: "backingBalances" })
-        );
-        var kernelAddress = "";
-        (auctionUiState.registeredAssets || []).forEach(function (asset) {
-          var exists = backing.some(function (item) { return item.address.toLowerCase() === asset.toLowerCase(); });
-          if (!exists) backing.push({ address: asset, amount: 0n });
-        });
-        if (isAddress(results.controller)) {
-          try {
-            kernelAddress = await client.readContract({
-              address: results.controller,
-              abi: CONTROLLER_VIEW_ABI,
-              functionName: "KERNEL"
-            });
-          } catch (kernelError) {
-            kernelAddress = "";
-          }
-        }
-        if (isAddress(kernelAddress) && backing.length) {
-          try {
-            var borrowedResults = await client.multicall({
-              allowFailure: true,
-              contracts: backing.map(function (item) {
-                return {
-                  address: kernelAddress,
-                  abi: KERNEL_VIEW_ABI,
-                  functionName: "viewData",
-                  args: [backingStateSlots(item.address)]
-                };
-              })
-            });
-            backing = backing.map(function (item, index) {
-              var stateResult = borrowedResults[index];
-              var stateValues = stateResult && stateResult.status === "success" ? stateResult.result : null;
-              var borrowed = Array.isArray(stateValues) && stateValues.length > 1 ? BigInt(stateValues[1]) : 0n;
-              return { address: item.address, amount: item.amount + borrowed };
-            });
-          } catch (borrowedError) {
-            // Fall back to vault-held backing if borrowed-state reads fail.
-          }
-        }
-        setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, backing, "--", "");
-      } catch (error) {
-        setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, null, "--", "");
-      }
+    if (results.backing) {
+      backing = results.backing.slice();
+      assets.forEach(function (asset) {
+        var exists = backing.some(function (item) { return item.address.toLowerCase() === asset.toLowerCase(); });
+        if (!exists) backing.push({ address: asset, amount: 0n });
+      });
+      backing = backing.map(function (item) {
+        var stateValues = results["view:" + item.address.toLowerCase()];
+        var borrowed = Array.isArray(stateValues) && stateValues.length > 1 ? BigInt(stateValues[1]) : 0n;
+        return { address: item.address, amount: item.amount + borrowed };
+      });
+      setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, backing, "--", "");
+    } else if (isAddress(vaultAddress)) {
+      setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, null, "--", "");
     }
 
     updateAuctionMaxControl();
