@@ -314,6 +314,16 @@
         margin: auto 0 28px;
       }
 
+      .borrow-form + .borrow-form {
+        margin-top: 34px;
+        padding-top: 34px;
+        border-top: 1px solid var(--c-cloud-hairline);
+      }
+
+      [data-repay-form] .field-label {
+        min-height: 2.8em;
+      }
+
       .field-meta-single {
         margin-top: 14px;
         color: rgba(244, 244, 242, 0.34);
@@ -612,6 +622,10 @@
           grid-template-columns: 1fr;
         }
 
+        [data-repay-form] .field-label {
+          min-height: 0;
+        }
+
         .field-meta {
           align-items: flex-start;
           flex-direction: column;
@@ -763,6 +777,52 @@
               <p class="borrow-status" role="status" aria-live="polite" data-page-status>
                 Connect a wallet to deposit ENTEN collateral and borrow.
               </p>
+            </form>
+
+            <form class="borrow-form" data-repay-form>
+              <div class="borrow-fields">
+                <div>
+                  <label class="field-label" for="repay-amount">Repay · MEGA</label>
+                  <div class="amount-shell">
+                    <input
+                      class="amount-input"
+                      id="repay-amount"
+                      name="repayAmount"
+                      type="number"
+                      inputmode="decimal"
+                      min="0"
+                      step="any"
+                      placeholder="0.00"
+                      autocomplete="off"
+                      data-available="0"
+                      data-repay-amount
+                    >
+                    <button class="max-button" type="button" data-repay-max>Max</button>
+                  </div>
+                  <div class="field-meta-single">Outstanding debt: <strong data-repay-debt>0.00 MEGA</strong></div>
+                </div>
+                <div>
+                  <label class="field-label" for="withdraw-amount">Withdraw · ENTEN <span class="field-optional">optional</span></label>
+                  <div class="amount-shell">
+                    <input
+                      class="amount-input"
+                      id="withdraw-amount"
+                      name="withdrawAmount"
+                      type="number"
+                      inputmode="decimal"
+                      min="0"
+                      step="any"
+                      placeholder="0.00"
+                      autocomplete="off"
+                      data-available="0"
+                      data-withdraw-amount
+                    >
+                    <button class="max-button" type="button" data-withdraw-max>Max</button>
+                  </div>
+                  <div class="field-meta-single">Collateral unlocked: <strong data-withdraw-available>0.00 ENTEN</strong></div>
+                </div>
+              </div>
+              <button class="borrow-action" type="submit" data-repay-submit disabled>Repay / Withdraw</button>
             </form>
           </article>
 

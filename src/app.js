@@ -444,8 +444,10 @@ import {
     isActive: false,
     collateral: null,
     debt: null,
+    debtAssetsCount: 0,
     available: null,
     entenBalance: null,
+    assetBalance: null,
     backingPerToken: null,
     availableWithWallet: null,
     assetAddress: "",
@@ -5571,6 +5573,25 @@ import {
     return grossLimit > borrowUiState.debt ? grossLimit - borrowUiState.debt : 0n;
   }
 
+  function borrowCollateralRequiredForDebt(debtAmount) {
+    var debt = BigInt(debtAmount || 0);
+    if (debt <= 0n) return 0n;
+    if (borrowUiState.backingPerToken === null || borrowUiState.backingPerToken <= 0n) return null;
+    return (debt * WAD + borrowUiState.backingPerToken - 1n) / borrowUiState.backingPerToken;
+  }
+
+  function borrowWithdrawableAfterRepay(repayAmount) {
+    var repay = BigInt(repayAmount || 0);
+    var debt;
+    var requiredCollateral;
+
+    if (borrowUiState.collateral === null || borrowUiState.debt === null) return null;
+    debt = repay >= borrowUiState.debt ? 0n : borrowUiState.debt - repay;
+    requiredCollateral = borrowCollateralRequiredForDebt(debt);
+    if (requiredCollateral === null) return null;
+    return borrowUiState.collateral > requiredCollateral ? borrowUiState.collateral - requiredCollateral : 0n;
+  }
+
   function updateBorrowCapacityPreview() {
     var collateralInput = $("[data-borrow-collateral-input]");
     var borrowInput = $("[data-borrow-amount]");
@@ -5583,6 +5604,28 @@ import {
     );
     if (borrowInput) {
       borrowInput.dataset.available = capacity !== null ? formatUnitsForInput(capacity, borrowUiState.assetDecimals) : "0";
+    }
+  }
+
+  function updateRepayWithdrawPreview() {
+    var repayInput = $("[data-repay-amount]");
+    var withdrawInput = $("[data-withdraw-amount]");
+    var repayAmount = parseUnits(repayInput ? repayInput.value : "", borrowUiState.assetDecimals);
+    var withdrawable = borrowWithdrawableAfterRepay(repayAmount);
+
+    setText(
+      "[data-withdraw-available]",
+      (withdrawable !== null ? formatUnits(withdrawable, borrowUiState.collateralDecimals, 4) : "0.00") + " ENTEN"
+    );
+    setText(
+      "[data-repay-debt]",
+      (borrowUiState.debt !== null ? formatUnits(borrowUiState.debt, borrowUiState.assetDecimals, 4) : "0.00") +
+        " " +
+        borrowUiState.assetSymbol
+    );
+    if (repayInput) repayInput.dataset.available = borrowUiState.debt !== null ? formatUnitsForInput(borrowUiState.debt, borrowUiState.assetDecimals) : "0";
+    if (withdrawInput) {
+      withdrawInput.dataset.available = withdrawable !== null ? formatUnitsForInput(withdrawable, borrowUiState.collateralDecimals) : "0";
     }
   }
 
@@ -5616,11 +5659,41 @@ import {
     }
   }
 
+  function updateRepaySubmitLabel() {
+    var submit = $("[data-repay-submit]");
+    if (!submit) return;
+
+    if (!borrowUiState.isActive) {
+      submit.disabled = true;
+      submit.textContent = "Repayment Unavailable";
+      return;
+    }
+
+    var repayInput = $("[data-repay-amount]");
+    var withdrawInput = $("[data-withdraw-amount]");
+    var repayAmount = repayInput ? Number(repayInput.value) : 0;
+    var withdrawAmount = withdrawInput ? Number(withdrawInput.value) : 0;
+    var hasRepay = Number.isFinite(repayAmount) && repayAmount > 0;
+    var hasWithdraw = Number.isFinite(withdrawAmount) && withdrawAmount > 0;
+
+    submit.disabled = false;
+    if (hasRepay && hasWithdraw) {
+      submit.textContent = "Repay & Withdraw";
+    } else if (hasRepay) {
+      submit.textContent = "Repay " + borrowUiState.assetSymbol;
+    } else if (hasWithdraw) {
+      submit.textContent = "Withdraw Collateral";
+    } else {
+      submit.textContent = "Repay / Withdraw";
+    }
+  }
+
   function setBorrowFormActive(active) {
     var badge = $("[data-borrow-badge]");
     if (badge) badge.textContent = active ? "Borrowing Live" : "Borrowing Unavailable";
 
     updateBorrowSubmitLabel();
+    updateRepaySubmitLabel();
   }
 
   function resetBorrowMetrics() {
@@ -5632,6 +5705,8 @@ import {
     setText("[data-borrow-collateral-amount]", "0.00");
     setText("[data-borrow-enten-balance]", "0.00 ENTEN");
     setText("[data-borrow-limit]", "0.00 " + borrowUiState.assetSymbol);
+    setText("[data-repay-debt]", "0.00 " + borrowUiState.assetSymbol);
+    setText("[data-withdraw-available]", "0.00 ENTEN");
   }
 
   async function loadBorrowData() {
@@ -5644,6 +5719,8 @@ import {
     var account = state.account;
     var borrowInput = $("[data-borrow-amount]");
     var collateralInput = $("[data-borrow-collateral-input]");
+    var repayInput = $("[data-repay-amount]");
+    var withdrawInput = $("[data-withdraw-amount]");
     var canSetStatus = shouldSetPassivePageStatus();
     var client;
     var calls;
@@ -5667,13 +5744,17 @@ import {
       borrowUiState.isActive = false;
       borrowUiState.collateral = null;
       borrowUiState.debt = null;
+      borrowUiState.debtAssetsCount = 0;
       borrowUiState.available = null;
       borrowUiState.entenBalance = null;
+      borrowUiState.assetBalance = null;
       borrowUiState.backingPerToken = null;
       borrowUiState.availableWithWallet = null;
       resetBorrowMetrics();
       if (borrowInput) borrowInput.dataset.available = "0";
       if (collateralInput) collateralInput.dataset.available = "0";
+      if (repayInput) repayInput.dataset.available = "0";
+      if (withdrawInput) withdrawInput.dataset.available = "0";
       setBorrowFormActive(false);
       if (canSetStatus) {
         setStatus(
@@ -5713,6 +5794,7 @@ import {
     if (account) {
       calls.push({ key: "position", functionName: "userPosition", args: [account] });
       calls.push({ key: "available", functionName: "borrowableForAsset", args: [account, borrowUiState.assetAddress] });
+      calls.push({ key: "assetBalance", address: borrowUiState.assetAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [account] });
       if (enten && isAddress(enten.address)) {
         calls.push({ key: "entenBalance", address: enten.address, abi: ERC20_ABI, functionName: "balanceOf", args: [account] });
         calls.push({ key: "totalSupply", address: enten.address, abi: ERC20_ABI, functionName: "totalSupply", args: [] });
@@ -5764,23 +5846,31 @@ import {
 
     var collateral = null;
     var debt = null;
+    var debtAssetsCount = 0;
     if (results.position) {
       collateral = BigInt(results.position.collateral || 0);
-      var match = normalizeBorrowDebt(results.position.debt).find(function (entry) {
+      var normalizedDebt = normalizeBorrowDebt(results.position.debt);
+      debtAssetsCount = normalizedDebt.filter(function (entry) {
+        return entry.amount > 0n;
+      }).length;
+      var match = normalizedDebt.find(function (entry) {
         return entry.address.toLowerCase() === borrowUiState.assetAddress.toLowerCase();
       });
       debt = match ? match.amount : 0n;
     }
     var available = results.available !== null && results.available !== undefined ? BigInt(results.available) : null;
     var entenBalance = results.entenBalance !== null && results.entenBalance !== undefined ? BigInt(results.entenBalance) : null;
+    var assetBalance = results.assetBalance !== null && results.assetBalance !== undefined ? BigInt(results.assetBalance) : null;
     var totalSupply = results.totalSupply !== null && results.totalSupply !== undefined ? BigInt(results.totalSupply) : null;
     var backingState = Array.isArray(results.backingState) ? results.backingState : null;
     var backingPerToken = backingPerTokenFromState(backingState, totalSupply);
 
     borrowUiState.collateral = collateral;
     borrowUiState.debt = debt;
+    borrowUiState.debtAssetsCount = debtAssetsCount;
     borrowUiState.available = available;
     borrowUiState.entenBalance = entenBalance;
+    borrowUiState.assetBalance = assetBalance;
     borrowUiState.backingPerToken = backingPerToken;
     borrowUiState.availableWithWallet =
       entenBalance !== null && backingPerToken !== null ? borrowCapacityForAdditionalCollateral(entenBalance) : null;
@@ -5805,6 +5895,7 @@ import {
     );
     if (collateralInput) collateralInput.dataset.available = entenBalance !== null ? formatUnitsForInput(entenBalance, borrowUiState.collateralDecimals) : "0";
     updateBorrowCapacityPreview();
+    updateRepayWithdrawPreview();
 
     setBorrowFormActive(borrowUiState.isActive);
 
@@ -5885,6 +5976,19 @@ import {
     return buildApproveTokenTransaction(enten.address, spender, collateralAmount);
   }
 
+  async function borrowRepayApproveTxIfNeeded(chain, repayAmount) {
+    var asset = borrowAssetConfig(chain);
+    var spender;
+    var allowance;
+
+    if (!asset || !isAddress(asset.address)) throw new Error("Repayment asset is not configured.");
+    spender = await resolveBorrowVault(chain);
+    if (!isAddress(spender)) throw new Error("Could not resolve the repayment vault spender.");
+    allowance = await tokenAllowance(asset.address, state.account, spender, chain);
+    if (allowance >= repayAmount) return null;
+    return buildApproveTokenTransaction(asset.address, spender, repayAmount);
+  }
+
   // Sequential collateral approval for injected wallets (MOSS batches instead).
   async function ensureBorrowCollateralApproval(chain, collateralAmount) {
     var enten = chain && chain.tokens ? chain.tokens.enten : null;
@@ -5945,6 +6049,65 @@ import {
     return true;
   }
 
+  async function ensureBorrowRepayApproval(chain, repayAmount) {
+    var asset = borrowAssetConfig(chain);
+    var spender;
+    var allowance;
+    var approvalTx;
+    var receipt;
+    var txHash;
+
+    if (!asset || !isAddress(asset.address)) {
+      setStatus("[data-page-status]", "Repayment asset is not configured.", "warn");
+      return false;
+    }
+
+    try {
+      spender = await resolveBorrowVault(chain);
+    } catch (error) {
+      spender = "";
+    }
+    if (!isAddress(spender)) {
+      setStatus("[data-page-status]", "Could not resolve the repayment vault spender.", "warn");
+      return false;
+    }
+
+    try {
+      allowance = await tokenAllowance(asset.address, state.account, spender, chain);
+    } catch (error) {
+      setStatus("[data-page-status]", "Could not read " + borrowUiState.assetSymbol + " allowance.", "warn");
+      return false;
+    }
+
+    if (allowance >= repayAmount) return true;
+
+    approvalTx = buildApproveTokenTransaction(asset.address, spender, repayAmount);
+
+    setStatus("[data-page-status]", "Simulating " + borrowUiState.assetSymbol + " approval...", "warn");
+    try {
+      await simulateTransaction(approvalTx, chain);
+    } catch (error) {
+      setStatus("[data-page-status]", borrowUiState.assetSymbol + " approval preflight failed: " + simulationFailureMessage(error), "warn");
+      return false;
+    }
+
+    setStatus("[data-page-status]", "Approving " + borrowUiState.assetSymbol + " repayment...", "warn");
+    txHash = await sendTransaction(approvalTx, chain);
+
+    setStatus("[data-page-status]", "Waiting for " + borrowUiState.assetSymbol + " approval...", "warn");
+    receipt = await waitForTransaction(txHash, chain);
+    if (!receipt) {
+      setStatus("[data-page-status]", borrowUiState.assetSymbol + " approval is still pending. Try again after it confirms.", "warn");
+      return false;
+    }
+    if (receipt.status === "0x0") {
+      setStatus("[data-page-status]", borrowUiState.assetSymbol + " approval reverted.", "warn");
+      return false;
+    }
+
+    return true;
+  }
+
   // Builds the deposit / depositAndBorrow / borrow calldata for the requested amounts.
   // Pure-borrow against the exact remaining limit uses borrowMax() to avoid dust reverts.
   function buildBorrowActionTx(address, asset, collateralAmount, borrowAmount) {
@@ -5966,6 +6129,31 @@ import {
             functionName: "borrow",
             args: [[{ asset: asset.address, amount: borrowAmount }]]
           });
+    }
+
+    return { from: state.account, to: address, data: data, value: "0x0" };
+  }
+
+  function buildRepayActionTx(address, asset, repayAmount, withdrawAmount) {
+    var data;
+    var repayAll = repayAmount > 0n && borrowUiState.debt !== null && repayAmount === borrowUiState.debt && borrowUiState.debtAssetsCount <= 1;
+
+    if (repayAmount > 0n && withdrawAmount > 0n) {
+      data = encodeFunctionData({
+        abi: BORROW_POLICY_ABI,
+        functionName: "repayAndWithdraw",
+        args: [[{ asset: asset.address, amount: repayAmount }], withdrawAmount]
+      });
+    } else if (repayAmount > 0n) {
+      data = repayAll
+        ? encodeFunctionData({ abi: BORROW_POLICY_ABI, functionName: "repayAll", args: [] })
+        : encodeFunctionData({
+            abi: BORROW_POLICY_ABI,
+            functionName: "repay",
+            args: [[{ asset: asset.address, amount: repayAmount }]]
+          });
+    } else {
+      data = encodeFunctionData({ abi: BORROW_POLICY_ABI, functionName: "withdraw", args: [withdrawAmount] });
     }
 
     return { from: state.account, to: address, data: data, value: "0x0" };
@@ -6117,14 +6305,164 @@ import {
     loadBorrowData();
   }
 
+  async function submitRepayWithdraw() {
+    var chain = currentChainConfig();
+    var repayInput = $("[data-repay-amount]");
+    var withdrawInput = $("[data-withdraw-amount]");
+    var address = borrowAddress(chain);
+    var asset = borrowAssetConfig(chain);
+    var repayAmount;
+    var withdrawAmount;
+    var withdrawable;
+    var actionTx;
+    var receipt;
+    var txHash;
+
+    if (!address) {
+      setStatus("[data-page-status]", "Borrowing is not available on this network.", "warn");
+      return;
+    }
+
+    if (!borrowUiState.isActive) {
+      setStatus("[data-page-status]", "Borrowing is currently paused.", "warn");
+      return;
+    }
+
+    if (!asset || !isAddress(asset.address)) {
+      setStatus("[data-page-status]", "Repayment asset is not configured on this network.", "warn");
+      return;
+    }
+
+    repayAmount = parseUnits(repayInput ? repayInput.value : "", asset.decimals);
+    withdrawAmount = parseUnits(withdrawInput ? withdrawInput.value : "", borrowUiState.collateralDecimals);
+
+    if (repayAmount <= 0n && withdrawAmount <= 0n) {
+      setStatus("[data-page-status]", "Enter an amount to repay or withdraw.", "warn");
+      if (repayInput) repayInput.focus();
+      return;
+    }
+
+    if (repayAmount > 0n && borrowUiState.debt !== null && repayAmount > borrowUiState.debt) {
+      setStatus("[data-page-status]", "Repayment exceeds your outstanding debt.", "warn");
+      return;
+    }
+
+    if (repayAmount > 0n && borrowUiState.assetBalance !== null && repayAmount > borrowUiState.assetBalance) {
+      setStatus("[data-page-status]", "Repayment exceeds your " + borrowUiState.assetSymbol + " balance.", "warn");
+      return;
+    }
+
+    if (withdrawAmount > 0n) {
+      withdrawable = borrowWithdrawableAfterRepay(repayAmount);
+      if (withdrawable !== null && withdrawAmount > withdrawable) {
+        setStatus("[data-page-status]", "Withdrawal exceeds collateral unlocked by this repayment.", "warn");
+        return;
+      }
+    }
+
+    actionTx = buildRepayActionTx(address, asset, repayAmount, withdrawAmount);
+
+    console.log("[borrow] repay tx built", {
+      to: actionTx.to,
+      repay: String(repayAmount),
+      withdraw: String(withdrawAmount)
+    });
+
+    if (isMossWallet()) {
+      var batch = [];
+      if (repayAmount > 0n) {
+        try {
+          var approveTx = await borrowRepayApproveTxIfNeeded(chain, repayAmount);
+          if (approveTx) batch.push(approveTx);
+        } catch (error) {
+          setStatus("[data-page-status]", error && error.message ? error.message : "Could not prepare the repayment approval.", "warn");
+          return;
+        }
+      }
+      batch.push(actionTx);
+
+      if (batch.length === 1) {
+        setStatus("[data-page-status]", "Simulating repayment transaction...", "warn");
+        try {
+          await simulateTransaction(actionTx, chain);
+        } catch (error) {
+          console.error("[borrow] repayment preflight (simulation) reverted", error);
+          setStatus("[data-page-status]", "Preflight failed: " + simulationFailureMessage(error), "warn");
+          return;
+        }
+      }
+
+      setStatus("[data-page-status]", batch.length > 1 ? "Submitting approve + repayment..." : "Submitting repayment...", "warn");
+      try {
+        txHash = await mossSendCalls(batch);
+      } catch (error) {
+        if (error && error.code === 4001) {
+          setStatus("[data-page-status]", "Transaction was rejected.", "warn");
+        } else {
+          setStatus("[data-page-status]", "Transaction failed: " + (error && error.message ? error.message : "unknown error"), "warn");
+        }
+        return;
+      }
+    } else {
+      if (repayAmount > 0n && !(await ensureBorrowRepayApproval(chain, repayAmount))) {
+        return;
+      }
+
+      setStatus("[data-page-status]", "Simulating repayment transaction...", "warn");
+      try {
+        await simulateTransaction(actionTx, chain);
+      } catch (error) {
+        console.error("[borrow] repayment preflight (simulation) reverted", error);
+        setStatus("[data-page-status]", "Preflight failed: " + simulationFailureMessage(error), "warn");
+        return;
+      }
+
+      setStatus("[data-page-status]", "Submitting repayment...", "warn");
+      try {
+        txHash = await sendTransaction(actionTx, chain);
+      } catch (error) {
+        if (error && error.code === 4001) {
+          setStatus("[data-page-status]", "Transaction was rejected.", "warn");
+        } else {
+          setStatus("[data-page-status]", "Transaction failed: " + (error && error.message ? error.message : "unknown error"), "warn");
+        }
+        return;
+      }
+    }
+
+    setStatus("[data-page-status]", "Submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
+    refreshBorrowDataSoon();
+
+    receipt = await waitForTransaction(txHash, chain);
+    if (!receipt) {
+      setStatus("[data-page-status]", "Submitted and still pending. Data will refresh after confirmation.", "warn");
+      return;
+    }
+    if (receipt.status === "0x0") {
+      setStatus("[data-page-status]", "Transaction reverted.", "warn");
+      loadBorrowData();
+      return;
+    }
+
+    setStatus("[data-page-status]", "Confirmed: " + txHash.slice(0, 10) + "...", "ok");
+    if (repayInput) repayInput.value = "";
+    if (withdrawInput) withdrawInput.value = "";
+    loadBorrowData();
+  }
+
   function bindBorrowPage() {
     if (!IS_BORROW_PAGE) return;
 
     var form = $("[data-borrow-form]");
+    var repayForm = $("[data-repay-form]");
     var borrowInput = $("[data-borrow-amount]");
     var borrowMaxButton = $("[data-borrow-max]");
     var collateralInput = $("[data-borrow-collateral-input]");
     var collateralMaxButton = $("[data-borrow-collateral-max]");
+    var repayInput = $("[data-repay-amount]");
+    var repayMaxButton = $("[data-repay-max]");
+    var withdrawInput = $("[data-withdraw-amount]");
+    var withdrawMaxButton = $("[data-withdraw-max]");
 
     loadBorrowData();
     startBorrowAutoRefresh();
@@ -6144,14 +6482,20 @@ import {
         var isValid = Number.isFinite(amount) && amount > 0;
         input.setAttribute("aria-invalid", isValid || !input.value ? "false" : "true");
         if (input === collateralInput) updateBorrowCapacityPreview();
+        if (input === repayInput) updateRepayWithdrawPreview();
         updateBorrowSubmitLabel();
+        updateRepaySubmitLabel();
       });
     }
 
     bindMax(borrowMaxButton, borrowInput);
     bindMax(collateralMaxButton, collateralInput);
+    bindMax(repayMaxButton, repayInput);
+    bindMax(withdrawMaxButton, withdrawInput);
     bindAmountInput(borrowInput);
     bindAmountInput(collateralInput);
+    bindAmountInput(repayInput);
+    bindAmountInput(withdrawInput);
 
     if (form) {
       form.addEventListener("submit", async function (event) {
@@ -6164,6 +6508,21 @@ import {
           await submitBorrow();
         } catch (error) {
           setStatus("[data-page-status]", "Borrow transaction failed or was rejected.", "warn");
+        }
+      });
+    }
+
+    if (repayForm) {
+      repayForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        if (!state.account && !(await connectWallet())) return;
+        if (!(await ensureBorrowNetwork("repayment"))) return;
+
+        try {
+          await submitRepayWithdraw();
+        } catch (error) {
+          setStatus("[data-page-status]", "Repayment transaction failed or was rejected.", "warn");
         }
       });
     }
