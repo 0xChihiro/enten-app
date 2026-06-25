@@ -138,6 +138,18 @@
         text-transform: uppercase;
       }
 
+      .telegram-diagnostics {
+        display: grid;
+        gap: 6px;
+        margin-top: 14px;
+        color: rgba(244, 244, 242, 0.48);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        line-height: 1.45;
+        text-transform: uppercase;
+      }
+
       .wallet-actions {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -192,6 +204,18 @@
         letter-spacing: 0.16em;
         padding: 10px 12px;
         text-transform: uppercase;
+      }
+
+      .telegram-primary {
+        border-color: rgba(239, 161, 67, 0.48);
+        background: rgba(239, 161, 67, 0.08);
+        color: var(--c-gold);
+      }
+
+      .browser-fallback {
+        border-color: rgba(76, 178, 168, 0.45);
+        background: rgba(76, 178, 168, 0.08);
+        color: var(--c-teal);
       }
 
       .wallet-refresh:disabled {
@@ -296,11 +320,27 @@
                 <span data-connected-chain>Wallet Selected</span>
               </div>
               <div class="telegram-env" data-telegram-env>Opening outside Telegram</div>
+              <div class="telegram-diagnostics">
+                <div data-passkey-support>Passkey support: checking</div>
+                <div data-telegram-platform>Platform: browser</div>
+              </div>
             </div>
-            <button class="connect-button" type="button" data-connect-wallet>Connect Wallet</button>
+            <button class="connect-button" type="button" data-telegram-connect-moss>Connect MOSS</button>
           </div>
 
           <div class="wallet-actions">
+            <button class="wallet-action telegram-primary" type="button" data-telegram-sign-message>
+              <span class="wallet-action-name">Sign Message</span>
+              <span class="wallet-action-sub">User-approved MOSS signature</span>
+            </button>
+            <button class="wallet-action" type="button" data-telegram-call-contract>
+              <span class="wallet-action-name">Contract Call</span>
+              <span class="wallet-action-sub">Placeholder only</span>
+            </button>
+            <button class="wallet-action browser-fallback" type="button" data-open-browser hidden>
+              <span class="wallet-action-name">Open Browser</span>
+              <span class="wallet-action-sub">Use passkeys outside Telegram</span>
+            </button>
             <button class="wallet-action" type="button" data-wallet-deposit>
               <span class="wallet-action-name">Deposit</span>
               <span class="wallet-action-sub">Add funds</span>
@@ -334,6 +374,50 @@
         var webApp = window.Telegram && window.Telegram.WebApp;
         var root = document.documentElement;
         var env = document.querySelector("[data-telegram-env]");
+        var openBrowser = document.querySelector("[data-open-browser]");
+        var passkeySupport = document.querySelector("[data-passkey-support]");
+        var platform = document.querySelector("[data-telegram-platform]");
+        var connectMoss = document.querySelector("[data-telegram-connect-moss]");
+        var signMessage = document.querySelector("[data-telegram-sign-message]");
+        var callContract = document.querySelector("[data-telegram-call-contract]");
+        var status = document.querySelector("[data-page-status]");
+
+        function setStatus(message) {
+          if (status) status.textContent = message;
+        }
+
+        function entenMoss() {
+          return window.__entenMoss || null;
+        }
+
+        function waitForMoss(callback, attempts) {
+          var moss = entenMoss();
+          if (moss) {
+            callback(moss);
+            return;
+          }
+          if (attempts <= 0) return;
+          window.setTimeout(function () {
+            waitForMoss(callback, attempts - 1);
+          }, 120);
+        }
+
+        function currentUrl() {
+          return window.location.href.split("#")[0];
+        }
+
+        function setPasskeyDiagnostics() {
+          var hasCredentials = Boolean(navigator.credentials);
+          var hasPublicKeyCredential = Boolean(window.PublicKeyCredential);
+          var secure = Boolean(window.isSecureContext);
+          if (passkeySupport) {
+            passkeySupport.textContent =
+              "Passkey support: " +
+              (secure ? "secure" : "not secure") +
+              " / " +
+              (hasCredentials && hasPublicKeyCredential ? "WebAuthn visible" : "WebAuthn unavailable");
+          }
+        }
 
         function applyInsets(insets) {
           if (!insets) return;
@@ -351,18 +435,131 @@
           applyInsets(webApp.contentSafeAreaInset);
         }
 
+        function initialiseMossSoon() {
+          waitForMoss(function (moss) {
+            if (typeof moss.initialise !== "function") return;
+            moss.initialise().catch(function (error) {
+              setStatus("MOSS initialisation failed: " + (error && error.message ? error.message : String(error)));
+            });
+          }, 40);
+        }
+
+        function verifyTelegramSession() {
+          if (!webApp || !webApp.initData) return;
+          fetch("/api/verify-telegram", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ telegramInitData: webApp.initData })
+          })
+            .then(function (response) {
+              return response.json().then(function (body) {
+                if (!response.ok) throw new Error(body && body.message ? body.message : "Telegram verification failed.");
+                return body;
+              });
+            })
+            .then(function (body) {
+              if (env) {
+                env.textContent = body.telegramUser && body.telegramUser.id
+                  ? "Verified Telegram user " + body.telegramUser.id
+                  : "Verified Telegram session";
+              }
+            })
+            .catch(function (error) {
+              if (env) env.textContent = "Telegram verification failed";
+              setStatus("Telegram verification failed: " + (error && error.message ? error.message : String(error)));
+            });
+        }
+
+        if (connectMoss) {
+          connectMoss.addEventListener("click", function () {
+            var moss = entenMoss();
+            if (!moss || typeof moss.connect !== "function") {
+              setStatus("MOSS runtime is still loading. Try again in a moment.");
+              return;
+            }
+            connectMoss.disabled = true;
+            setStatus("Opening the MOSS wallet...");
+            moss.connect()
+              .then(function (result) {
+                setStatus("MOSS connected: " + result.address);
+              })
+              .catch(function (error) {
+                setStatus("MOSS connect failed: " + (error && error.message ? error.message : String(error)));
+              })
+              .finally(function () {
+                connectMoss.disabled = false;
+              });
+          });
+        }
+
+        if (signMessage) {
+          signMessage.addEventListener("click", function () {
+            var moss = entenMoss();
+            var message = "Enten Telegram Mini App signature test " + new Date().toISOString();
+            if (!moss || typeof moss.signMessage !== "function") {
+              setStatus("MOSS runtime is still loading. Try again in a moment.");
+              return;
+            }
+            signMessage.disabled = true;
+            setStatus("Requesting user-approved MOSS signature...");
+            moss.signMessage(message)
+              .then(function () {
+                setStatus("MOSS signature approved.");
+              })
+              .catch(function (error) {
+                setStatus("MOSS signature failed: " + (error && error.message ? error.message : String(error)));
+              })
+              .finally(function () {
+                signMessage.disabled = false;
+              });
+          });
+        }
+
+        if (callContract) {
+          callContract.addEventListener("click", function () {
+            var moss = entenMoss();
+            if (!moss || typeof moss.callContractPlaceholder !== "function") {
+              setStatus("MOSS runtime is still loading. Try again in a moment.");
+              return;
+            }
+
+            // Placeholder for a real user-approved MOSS transaction:
+            // mega.callContract({
+            //   address: "0xContractAddress",
+            //   abi: contractAbi,
+            //   functionName: "functionName",
+            //   args: [/* function arguments */],
+            //   value: "0"
+            // });
+            moss.callContractPlaceholder().catch(function (error) {
+              setStatus(error && error.message ? error.message : String(error));
+            });
+          });
+        }
+
+        setPasskeyDiagnostics();
+        initialiseMossSoon();
+
         if (!webApp) {
           root.dataset.telegram = "browser";
           if (env) env.textContent = "Browser preview";
+          if (platform) platform.textContent = "Platform: browser";
           return;
         }
 
         root.dataset.telegram = "mini-app";
-        if (env) {
-          env.textContent = webApp.initDataUnsafe && webApp.initDataUnsafe.user
-            ? "Telegram user " + webApp.initDataUnsafe.user.id
-            : "Telegram session detected";
+        if (platform) platform.textContent = "Platform: " + (webApp.platform || "telegram");
+        if (openBrowser) {
+          openBrowser.hidden = false;
+          openBrowser.addEventListener("click", function () {
+            try {
+              webApp.openLink(currentUrl());
+            } catch (error) {
+              window.location.href = currentUrl();
+            }
+          });
         }
+        if (env) env.textContent = "Telegram session detected";
 
         try {
           webApp.ready();
@@ -374,6 +571,7 @@
           webApp.onEvent("viewportChanged", applyViewport);
           webApp.onEvent("safeAreaChanged", applyViewport);
           webApp.onEvent("contentSafeAreaChanged", applyViewport);
+          verifyTelegramSession();
         } catch (error) {
           if (env) env.textContent = "Telegram session detected";
         }

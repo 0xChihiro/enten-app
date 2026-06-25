@@ -7324,6 +7324,41 @@ import {
     try {
       window.__entenMoss = {
         load: loadMossSdk,
+        initialise: function () {
+          var network = mossNetworkForChainId(preferredChainId());
+          state.walletKind = "moss";
+          state.provider = state.provider || makeMossProvider();
+          state.chainId = mossChainIdForNetwork(network);
+          mossState.network = network;
+          updateWalletUi();
+          return ensureMossInitialised(network);
+        },
+        connect: async function () {
+          state.walletKind = "moss";
+          state.provider = state.provider || makeMossProvider();
+          setStatus("[data-page-status]", "Opening the MOSS wallet...", "warn");
+          var address = await connectMoss();
+          updateWalletUi();
+          setStatus("[data-page-status]", "MOSS wallet connected on " + currentChainName() + ".", "ok");
+          return {
+            address: address,
+            chainId: state.chainId,
+            network: mossState.network || mossNetworkForChainId(preferredChainId())
+          };
+        },
+        signMessage: async function (message) {
+          if (!isMossWallet() || !state.account) await window.__entenMoss.connect();
+          return withMossSdk(function (mega) {
+            return mega.signMessage(message);
+          });
+        },
+        callContractPlaceholder: async function () {
+          // Production contract writes should pass the contract address, ABI or
+          // pre-encoded calldata, function name, args, and optional native value
+          // to mega.callContract(). Keep this explicit so the Telegram smoke test
+          // cannot accidentally submit a real transaction.
+          throw new Error("Configure contract address, ABI/function/data, args, and value before enabling callContract.");
+        },
         getPermissions: function () {
           return withMossSdk(function (mega) { return mega.getPermissions(); });
         },
