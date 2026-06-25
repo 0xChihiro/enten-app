@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Enten | Telegram // MOSS</title>
+    <meta name="theme-color" content="#0c0d12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Enten">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="./pwa.js" defer></script>
+
+    <link rel="preload" href="./fonts/playfair-display-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="./styles.css">
+
+    <style>
+      :root {
+        --tg-safe-top: 0px;
+        --tg-safe-right: 0px;
+        --tg-safe-bottom: 0px;
+        --tg-safe-left: 0px;
+      }
+
+      body {
+        min-height: var(--tg-viewport-height, 100dvh);
+      }
+
+      .telegram-main {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        width: 100%;
+        justify-content: center;
+        padding: calc(92px + var(--tg-safe-top)) calc(20px + var(--tg-safe-right)) calc(56px + var(--tg-safe-bottom)) calc(20px + var(--tg-safe-left));
+      }
+
+      .telegram-stack {
+        display: grid;
+        width: min(100%, 680px);
+        gap: 18px;
+      }
+
+      .telegram-hero {
+        display: grid;
+        justify-items: start;
+        gap: 14px;
+      }
+
+      .telegram-kicker,
+      .telegram-meta,
+      .connect-button,
+      .wallet-debug,
+      .notice,
+      .wallet-action-name,
+      .wallet-action-sub {
+        font-family: var(--font-mono);
+      }
+
+      .telegram-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--c-gold);
+        font-size: 10px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+      }
+
+      .telegram-kicker::before {
+        width: 12px;
+        height: 1px;
+        background: var(--c-gold);
+        content: "";
+      }
+
+      .telegram-title {
+        max-width: 9ch;
+        font-family: var(--font-display);
+        font-size: clamp(3.1rem, 14vw, 5.2rem);
+        font-weight: 400;
+        letter-spacing: 0;
+        line-height: 0.95;
+      }
+
+      .telegram-meta {
+        color: var(--c-cloud-muted);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        line-height: 1.7;
+        text-transform: uppercase;
+      }
+
+      .telegram-panel {
+        border: 1px solid var(--c-cloud-hairline);
+        background: rgba(12, 13, 18, 0.72);
+        backdrop-filter: blur(16px);
+        padding: 22px;
+      }
+
+      .telegram-wallet-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 18px;
+        align-items: center;
+      }
+
+      .telegram-label {
+        margin-bottom: 10px;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+      }
+
+      .wallet-address {
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: clamp(1.35rem, 8vw, 2.4rem);
+        letter-spacing: 0;
+        line-height: 1;
+        overflow-wrap: anywhere;
+      }
+
+      .wallet-network,
+      .telegram-env {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .wallet-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .wallet-action {
+        display: grid;
+        gap: 6px;
+        min-height: 74px;
+        border: 1px solid var(--c-cloud-hairline);
+        background: rgba(244, 244, 242, 0.03);
+        color: var(--c-cloud);
+        padding: 14px;
+        text-align: left;
+      }
+
+      .wallet-action:disabled {
+        cursor: not-allowed;
+        opacity: 0.42;
+      }
+
+      .wallet-action-name {
+        color: var(--c-cloud);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .wallet-action-sub {
+        color: var(--c-cloud-muted);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        line-height: 1.4;
+        text-transform: uppercase;
+      }
+
+      .wallet-balances-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .wallet-refresh {
+        border: 1px solid rgba(239, 161, 67, 0.32);
+        background: rgba(239, 161, 67, 0.06);
+        color: var(--c-gold);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        padding: 10px 12px;
+        text-transform: uppercase;
+      }
+
+      .wallet-refresh:disabled {
+        opacity: 0.42;
+      }
+
+      .wallet-balances {
+        display: grid;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .wallet-balance-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: center;
+        border: 1px solid var(--c-cloud-hairline);
+        padding: 12px;
+      }
+
+      .wallet-balance-token {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .wallet-balance-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+      }
+
+      .wallet-balance-symbol,
+      .wallet-balance-amount {
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.06em;
+      }
+
+      .wallet-balance-name,
+      .wallet-balance-usd,
+      .wallet-balances-empty {
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        line-height: 1.5;
+        text-transform: uppercase;
+      }
+
+      .wallet-balance-amounts {
+        text-align: right;
+      }
+
+      .notice {
+        margin-top: 16px;
+        color: var(--c-cloud-muted);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        line-height: 1.5;
+        text-transform: uppercase;
+      }
+
+      .wallet-debug {
+        margin-top: 8px;
+        color: rgba(244, 244, 242, 0.42);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 620px) {
+        .telegram-wallet-head {
+          grid-template-columns: 1fr;
+        }
+
+        .telegram-wallet-head .connect-button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="telegram-main" data-wallet-page>
+      <div class="telegram-stack">
+        <section class="telegram-hero" aria-labelledby="telegram-title">
+          <div class="telegram-kicker">Telegram Mini App</div>
+          <h1 class="telegram-title" id="telegram-title">MOSS Wallet</h1>
+          <p class="telegram-meta">MegaETH access for Enten protocol actions</p>
+        </section>
+
+        <section class="telegram-panel" aria-label="MOSS wallet connection">
+          <div class="telegram-wallet-head">
+            <div>
+              <div class="telegram-label">Connected Account</div>
+              <div class="wallet-address" data-wallet-address>Not connected</div>
+              <div class="wallet-network">
+                <span class="status-dot" data-network-dot></span>
+                <span data-connected-chain>Wallet Selected</span>
+              </div>
+              <div class="telegram-env" data-telegram-env>Opening outside Telegram</div>
+            </div>
+            <button class="connect-button" type="button" data-connect-wallet>Connect Wallet</button>
+          </div>
+
+          <div class="wallet-actions">
+            <button class="wallet-action" type="button" data-wallet-deposit>
+              <span class="wallet-action-name">Deposit</span>
+              <span class="wallet-action-sub">Add funds</span>
+            </button>
+            <button class="wallet-action" type="button" data-wallet-open>
+              <span class="wallet-action-name">Open Wallet</span>
+              <span class="wallet-action-sub">Manage account</span>
+            </button>
+          </div>
+
+          <p class="notice" data-page-status>Connect your MOSS wallet to test Telegram Mini App access.</p>
+          <p class="wallet-debug" data-wallet-debug>Checking wallet provider...</p>
+        </section>
+
+        <section class="telegram-panel" aria-label="Token balances">
+          <div class="wallet-balances-head">
+            <div class="telegram-label">Balances</div>
+            <button class="wallet-refresh" type="button" data-wallet-refresh-balances>Refresh</button>
+          </div>
+          <div class="wallet-balances" data-wallet-balances>
+            <div class="wallet-balances-empty">Connect a MOSS wallet to view balances.</div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var webApp = window.Telegram && window.Telegram.WebApp;
+        var root = document.documentElement;
+        var env = document.querySelector("[data-telegram-env]");
+
+        function applyInsets(insets) {
+          if (!insets) return;
+          root.style.setProperty("--tg-safe-top", (insets.top || 0) + "px");
+          root.style.setProperty("--tg-safe-right", (insets.right || 0) + "px");
+          root.style.setProperty("--tg-safe-bottom", (insets.bottom || 0) + "px");
+          root.style.setProperty("--tg-safe-left", (insets.left || 0) + "px");
+        }
+
+        function applyViewport() {
+          if (!webApp) return;
+          var height = webApp.viewportStableHeight || webApp.viewportHeight;
+          if (height) root.style.setProperty("--tg-viewport-height", height + "px");
+          applyInsets(webApp.safeAreaInset);
+          applyInsets(webApp.contentSafeAreaInset);
+        }
+
+        if (!webApp) {
+          root.dataset.telegram = "browser";
+          if (env) env.textContent = "Browser preview";
+          return;
+        }
+
+        root.dataset.telegram = "mini-app";
+        if (env) {
+          env.textContent = webApp.initDataUnsafe && webApp.initDataUnsafe.user
+            ? "Telegram user " + webApp.initDataUnsafe.user.id
+            : "Telegram session detected";
+        }
+
+        try {
+          webApp.ready();
+          webApp.expand();
+          webApp.setHeaderColor("#0c0d12");
+          webApp.setBackgroundColor("#0c0d12");
+          if (webApp.BackButton) webApp.BackButton.hide();
+          applyViewport();
+          webApp.onEvent("viewportChanged", applyViewport);
+          webApp.onEvent("safeAreaChanged", applyViewport);
+          webApp.onEvent("contentSafeAreaChanged", applyViewport);
+        } catch (error) {
+          if (env) env.textContent = "Telegram session detected";
+        }
+      })();
+    </script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
