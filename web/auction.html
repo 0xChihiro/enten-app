@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Enten | Auctions // System Marketplace</title>
+    <title>Enten | Virtual Reserve // System Marketplace</title>
     <meta name="theme-color" content="#0c0d12">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -666,7 +666,7 @@
       .amount-input {
         width: 100%;
         min-height: 50px;
-        padding: 12px 118px 12px 16px;
+        padding: 12px 72px 12px 16px;
         border: 1px solid var(--c-cloud-faint);
         background: transparent;
         color: var(--c-cloud);
@@ -710,6 +710,43 @@
         color: rgba(244, 244, 242, 0.24);
       }
 
+      .denom-toggle {
+        display: inline-flex;
+        margin-bottom: 18px;
+        border: 1px solid var(--c-cloud-faint);
+      }
+
+      .denom-option {
+        padding: 7px 13px;
+        background: transparent;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+
+      .denom-option + .denom-option {
+        border-left: 1px solid var(--c-cloud-faint);
+      }
+
+      .denom-option.is-active {
+        background: rgba(76, 178, 168, 0.12);
+        color: var(--c-teal);
+      }
+
+      .denom-estimate {
+        min-height: 16px;
+        margin: 10px 0 0;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        line-height: 1.45;
+      }
+
       .amount-unit {
         position: absolute;
         top: 50%;
@@ -718,6 +755,30 @@
         font-family: var(--font-mono);
         font-size: 12px;
         transform: translateY(-50%);
+      }
+
+      .amount-row[hidden],
+      .exact-inputs[hidden] {
+        display: none;
+      }
+
+      .exact-inputs {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .exact-input-row {
+        position: relative;
+      }
+
+      .exact-input-label {
+        margin-bottom: 6px;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
       }
 
       .amount-meta,
@@ -755,6 +816,138 @@
         font-family: var(--font-mono);
         font-size: 10px;
         line-height: 1.5;
+      }
+
+      .side-toggle {
+        display: flex;
+        width: 100%;
+        margin-bottom: 24px;
+        border: 1px solid var(--c-cloud-faint);
+      }
+
+      [data-auction-buy-panel],
+      [data-auction-sell-panel] {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .side-option {
+        flex: 1;
+        padding: 12px 24px;
+        background: transparent;
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-align: center;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+
+      .side-option + .side-option {
+        border-left: 1px solid var(--c-cloud-faint);
+      }
+
+      .side-option[data-auction-side="buy"].is-active {
+        background: rgba(239, 161, 67, 0.12);
+        color: var(--c-gold);
+      }
+
+      .side-option[data-auction-side="sell"].is-active {
+        background: rgba(76, 178, 168, 0.12);
+        color: var(--c-teal);
+      }
+
+      [data-auction-buy-panel][hidden],
+      [data-auction-sell-panel][hidden] {
+        display: none;
+      }
+
+      .sell-receive {
+        margin: 16px 0 0;
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 1.05rem;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+
+      .price-compare {
+        display: grid;
+        gap: 12px;
+        margin: 24px 0 8px;
+        padding: 20px 0;
+        border-top: 1px solid var(--c-cloud-hairline);
+        border-bottom: 1px solid var(--c-cloud-hairline);
+      }
+
+      .compare-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .compare-label {
+        color: var(--c-cloud-muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .compare-value {
+        color: var(--c-cloud);
+        font-family: var(--font-mono);
+        font-size: 1.05rem;
+      }
+
+      .compare-row[data-better="true"] .compare-value {
+        color: var(--c-teal);
+      }
+
+      .compare-row[data-better="true"] .compare-label::after {
+        content: " · best";
+        color: var(--c-teal);
+      }
+
+      .sell-button {
+        display: flex;
+        width: 100%;
+        min-height: 64px;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        border: 1px solid rgba(76, 178, 168, 0.5);
+        background: transparent;
+        color: var(--c-teal);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        transition:
+          background-color 0.3s ease,
+          border-color 0.3s ease,
+          color 0.3s ease;
+      }
+
+      .sell-button:hover {
+        border-color: var(--c-teal);
+        background: var(--c-teal);
+        color: var(--c-base);
+      }
+
+      .sell-button svg {
+        width: 16px;
+        height: 16px;
+        transition: transform 0.3s ease;
+      }
+
+      .sell-button:hover svg {
+        transform: translateX(4px);
       }
 
       .next-drop {
@@ -980,7 +1173,7 @@
           <li class="nav-group">
             <button class="nav-group-trigger" type="button" aria-haspopup="true">Markets</button>
             <ul class="nav-dropdown">
-              <li><a href="/auction" data-nav>Auctions</a></li>
+              <li><a href="/auction" data-nav>Reserve</a></li>
               <li><a href="/swap" data-nav>Swap</a></li>
               <li><a href="/borrow" data-nav>Borrow</a></li>
             </ul>
@@ -1008,18 +1201,18 @@
     <main class="auction-shell" data-auction-page>
       <section class="reveal active" aria-labelledby="auction-title">
         <div class="sys-label">
-          <div class="mono-label">SYS_04 // AUCTIONS</div>
+          <div class="mono-label">SYS_04 // VIRTUAL RESERVE</div>
         </div>
 
-        <h1 class="auction-title" id="auction-title">Allocating Horizon.</h1>
+        <h1 class="auction-title" id="auction-title">Continuous Issuance.</h1>
 
         <p class="auction-copy">
-          Predictable value allocation via descending-price auction. A fixed token supply is offered
-          each epoch, with price decaying automatically until fully subscribed or the epoch concludes.
-          Transparent, equitable, and free of bidding wars.
+          Mint ENTEN directly from the protocol's virtual reserve market. Each buy pays every registered
+          backing asset at the live backing floor plus a virtual-reserve premium, with quotes sourced from
+          the contract before execution.
         </p>
 
-        <div class="summary-grid" aria-label="Auction overview">
+        <div class="summary-grid" aria-label="Virtual reserve overview">
           <div class="summary-item">
             <div class="summary-label">Total Backing</div>
             <div class="summary-value">
@@ -1027,17 +1220,17 @@
             </div>
           </div>
           <div class="summary-item">
-            <div class="summary-label">Epoch Allocation</div>
+            <div class="summary-label">Total Minted</div>
             <div class="summary-value">
               <span data-auction-epochAllocation>--</span> <span data-auction-epochAllocation-unit>ENTEN</span>
             </div>
           </div>
           <div class="summary-item">
             <div class="summary-label">Market Type</div>
-            <div class="summary-value teal">Dutch</div>
+            <div class="summary-value teal">Reserve</div>
           </div>
           <div class="summary-item">
-            <div class="summary-label">Time Left</div>
+            <div class="summary-label">Market Status</div>
             <div class="summary-value">
               <span data-auction-timeLeft>--:--:--</span>
             </div>
@@ -1045,7 +1238,7 @@
         </div>
       </section>
 
-      <section class="market-section reveal" style="transition-delay: 0.15s;" aria-label="Auction purchase panel">
+      <section class="market-section reveal" style="transition-delay: 0.15s;" aria-label="Virtual reserve purchase panel">
         <div class="market-panel panel-grid">
           <div class="market-layout">
             <div class="market-info">
@@ -1058,16 +1251,15 @@
                 <h2 class="route-title">Core Ingress</h2>
 
                 <p class="route-copy">
-                  Fixed allocation of ENTEN tokens distributed via descending-price auction. Price decays
-                  automatically every block until all tokens are acquired or the epoch concludes. No
-                  bidding wars, only transparent, predictable value.
+                  Live virtual-reserve minting against protocol backing. Price impact comes from the current
+                  reserve depth and resets automatically when a curve segment is consumed.
                 </p>
               </div>
 
               <div class="protocol-row">
                 <div>
                   <div class="protocol-label">Protocol Specs</div>
-                  <div class="protocol-value">Dutch Auction · Epoch-Based</div>
+                  <div class="protocol-value">Virtual Reserve · Continuous</div>
                 </div>
                 <div class="protocol-divider" aria-hidden="true"></div>
                 <div>
@@ -1078,32 +1270,38 @@
             </div>
 
             <form class="purchase-panel" data-auction-form>
+              <div class="side-toggle" role="group" aria-label="Buy or sell ENTEN against the virtual reserve">
+                <button type="button" class="side-option is-active" data-auction-side="buy" aria-pressed="true">Buy</button>
+                <button type="button" class="side-option" data-auction-side="sell" aria-pressed="false">Sell</button>
+              </div>
+
+              <div data-auction-buy-panel>
               <div>
                 <div class="metric-label">Current Price</div>
                 <div class="price-row">
                   <span class="current-price" data-auction-currentPrice>--</span>
                   <span class="current-price-unit" data-auction-currentPrice-unit></span>
                 </div>
-                <div class="equivalent-text">Live payment requirement from the active auction contract.</div>
+                <div class="equivalent-text">Live spot payment requirement from the virtual reserve contract.</div>
 
                 <div class="decay-panel" aria-hidden="true">
                   <div class="decay-row">
-                    <span class="decay-label">Price Decay</span>
-                    <span class="decay-value">Epoch Start -> Epoch End</span>
+                    <span class="decay-label">Premium Decay</span>
+                    <span class="decay-value">Half-Life -> Resting Premium</span>
                   </div>
                   <div class="decay-track">
                     <div class="decay-fill"></div>
                     <div class="decay-marker"></div>
                   </div>
                   <div class="decay-foot">
-                    <span>Epoch Start</span>
-                    <span>Epoch End</span>
+                    <span>Open</span>
+                    <span>Floor + Minimum Premium</span>
                   </div>
                 </div>
 
                 <div class="panel-metrics">
                   <div>
-                    <div class="metric-label">Epoch Time</div>
+                    <div class="metric-label">Market Status</div>
                     <div class="small-reading">
                       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -1113,7 +1311,7 @@
                     </div>
                   </div>
                   <div>
-                    <div class="metric-label">Tokens Available</div>
+                    <div class="metric-label">Max Single Buy</div>
                     <div class="small-reading">
                       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path>
@@ -1127,8 +1325,12 @@
 
               <div>
                 <div class="input-block">
-                  <div class="metric-label">Enter Amount</div>
-                  <div class="amount-row">
+                  <div class="denom-toggle" role="group" aria-label="Choose virtual reserve swap mode">
+                    <button type="button" class="denom-option is-active" data-auction-mode="enten" aria-pressed="true">Exact Output</button>
+                    <button type="button" class="denom-option" data-auction-mode="spend" aria-pressed="false">Exact Input</button>
+                  </div>
+                  <div class="metric-label" data-auction-input-label>Exact Output</div>
+                  <div class="amount-row" data-auction-output-row>
                     <input
                       class="amount-input"
                       id="bidAmount"
@@ -1138,45 +1340,89 @@
                       placeholder="0.00"
                       step="any"
                       autocomplete="off"
-                      aria-label="ENTEN amount to acquire"
+                      aria-label="Exact ENTEN output amount"
                     >
-                    <button class="amount-max" type="button" data-auction-max-amount disabled>Max</button>
-                    <span class="amount-unit">ENTEN</span>
+                    <span class="amount-unit" data-auction-input-unit>ENTEN</span>
                   </div>
+                  <div class="exact-inputs" data-auction-exact-inputs hidden></div>
                   <div class="amount-meta">
-                    <span>Amount to acquire</span>
+                    <span data-auction-input-meta-label>ENTEN output amount</span>
                     <span data-auction-payment-estimate>Estimated spend: --</span>
                   </div>
-                  <p class="notice" data-page-status>Loading auction data...</p>
-                  <p class="wallet-debug" data-wallet-debug>Checking wallet provider...</p>
+                  <p class="denom-estimate" data-auction-secondary-estimate></p>
                 </div>
 
                 <div class="next-drop">
-                  <span>Epoch Clock</span>
-                  <span>Updates from contract timing</span>
+                  <span>Market Mode</span>
+                  <span>Continuous quotes from contract</span>
                 </div>
 
                 <div class="auction-actions">
                   <button class="acquire-button" type="submit">
-                    Acquire at Current Price
+                    Swap at Current Quote
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
                     </svg>
                   </button>
-                  <button class="buy-max-button" type="button" data-auction-buy-max disabled>
-                    Acquire Max
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 12h16m0 0l-5-5m5 5l-5 5"></path>
-                    </svg>
-                  </button>
                   <button class="start-next-button" type="button" data-auction-start-next hidden>
-                    Start Next Auction
+                    Open / Admin Action
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 5v14m7-7H5"></path>
                     </svg>
                   </button>
                 </div>
               </div>
+              </div>
+
+              <div data-auction-sell-panel hidden>
+                <div class="input-block" style="border-top: 0; padding-top: 0;">
+                  <div class="metric-label">Redeem Amount</div>
+                  <div class="amount-row">
+                    <input
+                      class="amount-input"
+                      id="sellAmount"
+                      name="sellAmount"
+                      type="number"
+                      inputmode="decimal"
+                      placeholder="0.00"
+                      step="any"
+                      autocomplete="off"
+                      data-auction-sell-input
+                      aria-label="ENTEN amount to redeem"
+                    >
+                    <span class="amount-unit" data-auction-sell-unit>ENTEN</span>
+                  </div>
+                  <div class="amount-meta">
+                    <span>ENTEN to redeem</span>
+                  </div>
+                  <p class="sell-receive" data-auction-sell-proceeds>You receive: --</p>
+
+                  <div class="price-compare" aria-label="Reserve versus pool price comparison">
+                    <div class="compare-row" data-auction-reserve-compare>
+                      <span class="compare-label">Redemption value</span>
+                      <span class="compare-value" data-auction-reserve-price>--</span>
+                    </div>
+                    <div class="compare-row" data-auction-pool-compare>
+                      <span class="compare-label">Pool price</span>
+                      <span class="compare-value" data-auction-pool-price>--</span>
+                    </div>
+                  </div>
+                  <p class="denom-estimate" data-auction-sell-hint>
+                    Redeem ENTEN for its backing assets at the reserve floor. Compare with the live pool price before selling.
+                  </p>
+                </div>
+                <div class="auction-actions">
+                  <button class="sell-button" type="submit" data-auction-sell-submit>
+                    Sell to Reserve
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <p class="notice" data-page-status>Loading virtual reserve data...</p>
+              <p class="wallet-debug" data-wallet-debug>Checking wallet provider...</p>
             </form>
           </div>
         </div>
@@ -1184,8 +1430,8 @@
 
       <footer class="auction-footer reveal">
         <div class="footer-stats">
-          <div>Reads: Price / Lot / Backing</div>
-          <div>Writes: Approve / Buy / Start</div>
+          <div>Reads: Prices / Reserves / Backing</div>
+          <div>Writes: Approve / Buy</div>
           <div>Network: Wallet Selected</div>
         </div>
         <div>(C) 2026 Enten Protocol</div>

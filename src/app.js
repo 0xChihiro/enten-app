@@ -107,10 +107,11 @@ import {
         ]
       },
       auction: {
-        address: "",
+        address: "0xa0A5161f826f1B94269F69Dd9c09fFb2381b2EF4",
         vaultAddress: "0x0E30e29e064f22fF434E3617C9EcB9A7a09EC189",
         mintDecimals: 18,
         deadlineSeconds: 1200,
+        maxPaymentBufferBps: 50,
         maxPayments: []
       },
       presale: {
@@ -203,10 +204,11 @@ import {
         ]
       },
       auction: {
-        address: "0xAd16d09D1e748b0344E16FfE09Fe1d1485d29543",
+        address: "",
         vaultAddress: "0x3D22b11c966Eaa12e0eEe672C3119Df72AA708ef",
         mintDecimals: 18,
         deadlineSeconds: 1200,
+        maxPaymentBufferBps: 50,
         maxPayments: []
       },
       presale: {
@@ -240,14 +242,20 @@ import {
   ]);
 
   var AUCTION_ABI = parseAbi([
-    "function getPrice() view returns ((address token, uint256 amount)[])",
-    "function remainingLot() view returns (uint256)",
-    "function LOT_SIZE() view returns (uint256)",
+    "function CONTROLLER() view returns (address)",
+    "function getPrices() view returns ((address asset, uint256 amount)[] prices)",
+    "function quote(uint256 amount) view returns ((address asset, uint256 amount)[] payments, uint256[] spotPrices, uint256[] nextPremiums)",
+    "function buy(uint256 amount, (address asset, uint256 amount)[] maxPayments, uint256 deadline)",
+    "function sell(uint256 amount, (address asset, uint256 amount)[] minProceeds, uint256 deadline) returns ((address asset, uint256 amount)[] proceeds)",
+    "function redemptionValue(uint256 amount) view returns ((address asset, uint256 amount)[] proceeds)",
+    "function registeredAssets() view returns (address[])",
+    "function reserveOf(address asset) view returns (uint256)",
     "function startTime() view returns (uint256)",
-    "function epochPeriod() view returns (uint256)",
-    "function epochId() view returns (uint256)",
-    "function buy(uint256 epochId, uint256 deadline, uint256 mintAmount, (address token, uint256 amount)[] maxPayments)",
-    "function startNextAuction()"
+    "function totalMinted() view returns (uint256)",
+    "function HALF_LIFE() view returns (uint256)",
+    "function RESET_THRESHOLD_BPS() view returns (uint256)",
+    "function RESET_TARGET_BPS() view returns (uint256)",
+    "function MIN_PREMIUM_BPS() view returns (uint256)"
   ]);
 
   var PRESALE_AUCTION_ABI = parseAbi([
@@ -277,7 +285,7 @@ import {
   ]);
 
   var VAULT_ABI = parseAbi(["function backingBalances() view returns ((address token, uint256 amount)[])"]);
-  var CONTROLLER_VIEW_ABI = parseAbi(["function VAULT() view returns (address)"]);
+  var CONTROLLER_VIEW_ABI = parseAbi(["function VAULT() view returns (address)", "function KERNEL() view returns (address)"]);
   var KERNEL_VIEW_ABI = parseAbi(["function viewData(bytes32[] slots) view returns (bytes32[])"]);
 
   // Kernel namespaces used by the protocol's backingPerToken helper. The two
@@ -418,7 +426,22 @@ import {
     remainingLot: null,
     prices: [],
     mintDecimals: 18,
-    chainId: ""
+    chainId: "",
+    quoteRequestId: 0,
+    quoteTimer: null,
+    lastQuote: null,
+    inputMode: "enten",
+    side: "buy",
+    spendAssetAddress: "",
+    derivedMintAmount: null,
+    derivedQuote: null,
+    sellQuoteTimer: null,
+    sellQuoteRequestId: 0,
+    redemptionProceeds: null,
+    priceCompareRequestId: 0,
+    vaultAddress: "",
+    registeredAssets: [],
+    totalMinted: null
   };
   var presaleUiState = {
     remainingLot: null,
@@ -983,8 +1006,8 @@ import {
     if (presaleUiState.assetAddress) addApprove(presaleUiState.assetAddress);
 
     if (chain.auction) {
-      add(chain.auction.address, "buy(uint256,uint256,uint256,(address,uint256)[])");
-      add(chain.auction.address, "startNextAuction()");
+      add(auctionAddress(chain), "buy(uint256,(address,uint256)[],uint256)");
+      add(auctionAddress(chain), "sell(uint256,(address,uint256)[],uint256)");
     }
     var presale = presaleAddress(chain);
     add(presale, "buy(uint256,uint256,uint256)");
@@ -1340,10 +1363,35 @@ import {
     return supportedChain(state.chainId);
   }
 
+  function auctionAddress(chain) {
+    var configured = chain && chain.auction ? chain.auction.address : "";
+    var override = "";
+    var overrides;
+
+    try {
+      overrides = window.ENTEN_VIRTUAL_RESERVE_ADDRESSES || window.ENTEN_AUCTION_ADDRESSES || null;
+      if (overrides && chain) {
+        override =
+          overrides[chain.chainId] ||
+          overrides[chain.chainId.toLowerCase()] ||
+          overrides[String(chain.chainIdDecimal)] ||
+          "";
+      }
+      if (!override) {
+        override = window.ENTEN_VIRTUAL_RESERVE_ADDRESS || window.ENTEN_AUCTION_ADDRESS || "";
+      }
+    } catch (error) {
+      override = "";
+    }
+
+    if (isAddress(override)) return override;
+    return isAddress(configured) ? configured : "";
+  }
+
   function chainWithConfiguredAuction() {
     var preferred = supportedChain(preferredChainId());
 
-    if (preferred && preferred.auction && isAddress(preferred.auction.address)) {
+    if (auctionAddress(preferred)) {
       return preferred;
     }
 
@@ -1353,14 +1401,14 @@ import {
           return SUPPORTED_CHAINS[chainId];
         })
         .find(function (chain) {
-          return chain && chain.auction && isAddress(chain.auction.address);
+          return auctionAddress(chain);
         }) || null
     );
   }
 
   function activeAuctionChainConfig() {
     var connected = currentChainConfig();
-    if (connected && connected.auction && isAddress(connected.auction.address)) return connected;
+    if (auctionAddress(connected)) return connected;
     return chainWithConfiguredAuction();
   }
 
@@ -1968,7 +2016,7 @@ import {
     if (!chain) return "";
 
     if (kind === "auction") {
-      return chain.auction && chain.auction.address ? chain.auction.address : "";
+      return auctionAddress(chain);
     }
 
     if (kind === "presale") {
@@ -2230,12 +2278,13 @@ import {
 
   // USD value backing one ENTEN if redeemed: backingPerToken (backing-asset amount
   // per ENTEN, from the kernel — same math the presale/borrow pages use) priced
-  // through the backing asset's USD quote on Kumbaya. Returns a "$x" string or "--".
-  async function readEntenBackingUsd(chain, enten) {
+  // through the backing asset's USD quote on Kumbaya. This is exactly what the virtual
+  // reserve's {sell}/{redemptionValue} pays out. Returns { amount, decimals } or null.
+  async function entenBackingUsdValue(chain, enten) {
     var backingAsset = presaleBackingAssetConfig(chain);
     var kernel = swapKernelAddress(chain);
 
-    if (!backingAsset || !isAddress(backingAsset.address) || !isAddress(kernel)) return "--";
+    if (!backingAsset || !isAddress(backingAsset.address) || !isAddress(kernel)) return null;
 
     var results = await publicClientForChain(chain).multicall({
       allowFailure: true,
@@ -2253,14 +2302,20 @@ import {
     var totalSupply = results[0] && results[0].status === "success" ? results[0].result : null;
     var backingState = results[1] && results[1].status === "success" && Array.isArray(results[1].result) ? results[1].result : null;
     var backingPerToken = backingPerTokenFromState(backingState, totalSupply);
-    if (backingPerToken === null) return "--";
+    if (backingPerToken === null) return null;
 
     var assetUsd = await readAssetUsdPrice(chain, backingAsset.address);
-    if (!assetUsd || !assetUsd.amount || assetUsd.amount <= 0n) return "--";
+    if (!assetUsd || !assetUsd.amount || assetUsd.amount <= 0n) return null;
 
     // backingPerToken is backing-asset wei per 1 ENTEN; assetUsd.amount is USD wei
     // per 1 whole backing token, so normalise by WAD to get USD wei per ENTEN.
-    return "$" + formatUnits((backingPerToken * assetUsd.amount) / WAD, assetUsd.decimals, 6);
+    return { amount: (backingPerToken * assetUsd.amount) / WAD, decimals: assetUsd.decimals };
+  }
+
+  // String wrapper around {entenBackingUsdValue} for the swap page readout.
+  async function readEntenBackingUsd(chain, enten) {
+    var value = await entenBackingUsdValue(chain, enten);
+    return value ? formatUsdPrice(value) : "--";
   }
 
   // Market context for the swap page: the live ENTEN price in USDm and the USD
@@ -3232,23 +3287,20 @@ import {
     }, 250);
   }
 
-  function paymentEstimateText(chain, amount) {
-    var prices = auctionUiState.prices || [];
-    var mintDecimals = auctionUiState.mintDecimals;
-    var payments;
+  function paymentEstimateText(chain, payments) {
+    var nonzeroPayments;
 
-    if (!amount || amount <= 0n) return "Estimated spend: --";
-    if (!prices.length) return "Estimated spend unavailable";
+    if (!payments || !payments.length) return "Estimated spend: --";
 
-    payments = paymentsForMintAmount(prices, amount, mintDecimals).filter(function (payment) {
+    nonzeroPayments = payments.filter(function (payment) {
       return payment.amount > 0n;
     });
 
-    if (!payments.length) return "Estimated spend: --";
+    if (!nonzeroPayments.length) return "Estimated spend: --";
 
     return (
       "Estimated spend: " +
-      payments
+      nonzeroPayments
         .map(function (payment) {
           var display = assetDisplay(chain, payment, 6);
           return display.value + " " + display.unit;
@@ -3259,8 +3311,207 @@ import {
 
   function paymentEstimateValueText(estimate) {
     if (estimate === "Estimated spend unavailable") return "Unavailable";
-    if (estimate === "Exceeds available lot") return "Exceeds available";
+    if (estimate === "Exceeds available lot" || estimate === "Exceeds available liquidity") return "Exceeds available";
     return String(estimate || "").replace(/^Estimated spend:\s*/, "") || "--";
+  }
+
+  function setAuctionPreviewText(text) {
+    setText("[data-auction-payment-estimate]", text);
+    setText("[data-auction-payment-total]", paymentEstimateValueText(text));
+  }
+
+  function auctionInputMode() {
+    return auctionUiState.inputMode === "spend" ? "spend" : "enten";
+  }
+
+  function auctionPaymentAssets(chain) {
+    var seen = {};
+    var items = [];
+
+    function add(address) {
+      var normalized = String(address || "").toLowerCase();
+      if (!isAddress(address) || seen[normalized]) return;
+      seen[normalized] = true;
+      items.push(address);
+    }
+
+    (auctionUiState.registeredAssets || []).forEach(add);
+    (auctionUiState.prices || []).forEach(function (price) { add(price.address); });
+    if (!items.length && chain && chain.auction && Array.isArray(chain.auction.maxPayments)) {
+      chain.auction.maxPayments.forEach(function (payment) { add(payment.address || payment.token || payment[0]); });
+    }
+
+    return items;
+  }
+
+  function auctionAssetDecimals(chain, asset) {
+    var token = tokenConfigForAddress(chain, asset);
+    return token && token.decimals !== undefined ? token.decimals : 18;
+  }
+
+  function auctionAssetSymbol(chain, asset) {
+    if (!isAddress(asset)) return "ASSET";
+    return assetDisplay(chain, { address: asset, amount: 0n }, 4).unit;
+  }
+
+  function activeAuctionExactInput() {
+    var active = document.activeElement;
+    var inputs = $all("[data-auction-exact-input]");
+    var firstFilled = null;
+
+    if (active && active.matches && active.matches("[data-auction-exact-input]")) return active;
+    inputs.forEach(function (input) {
+      if (!firstFilled && input.value) firstFilled = input;
+    });
+    return firstFilled || inputs[0] || null;
+  }
+
+  function paymentForAsset(payments, asset) {
+    var normalized = String(asset || "").toLowerCase();
+    var payment = (payments || []).find(function (item) {
+      return item && isAddress(item.address) && item.address.toLowerCase() === normalized;
+    });
+    return payment ? payment.amount : null;
+  }
+
+  async function estimateAuctionMintForSpend(chain, spend, asset) {
+    var mintDecimals = auctionUiState.mintDecimals;
+    var scale = 10n ** BigInt(mintDecimals);
+    var price = (auctionUiState.prices || []).find(function (item) {
+      return item.address && item.address.toLowerCase() === String(asset || "").toLowerCase();
+    });
+    var remaining = auctionUiState.remainingLot;
+    var lo = 0n;
+    var hi;
+    var mid;
+    var quote;
+    var payment;
+    var iterations = 0;
+
+    if (!chain || !auctionAddress(chain) || spend <= 0n || !isAddress(asset)) return null;
+    if (remaining === null || remaining <= 0n) return null;
+
+    hi = remaining;
+    if (price && price.amount > 0n) {
+      hi = ceilDivBig(spend * scale, price.amount);
+      if (hi <= 0n) hi = 1n;
+      if (hi > remaining) hi = remaining;
+    }
+
+    while (hi < remaining && iterations < 8) {
+      quote = await readAuctionQuote(chain, hi);
+      payment = paymentForAsset(quote.payments, asset);
+      if (payment === null || payment > spend) break;
+      lo = hi;
+      hi = hi * 2n;
+      if (hi > remaining) hi = remaining;
+      iterations += 1;
+    }
+
+    quote = await readAuctionQuote(chain, hi);
+    payment = paymentForAsset(quote.payments, asset);
+    if (payment !== null && payment <= spend) {
+      return { amount: hi, quote: quote };
+    }
+
+    for (iterations = 0; iterations < 44 && lo + 1n < hi; iterations += 1) {
+      mid = (lo + hi) / 2n;
+      quote = await readAuctionQuote(chain, mid);
+      payment = paymentForAsset(quote.payments, asset);
+      if (payment !== null && payment <= spend) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+
+    if (lo <= 0n) return null;
+    quote = await readAuctionQuote(chain, lo);
+    return { amount: lo, quote: quote };
+  }
+
+  function setAuctionInputMode(mode) {
+    var next = mode === "spend" ? "spend" : "enten";
+    var chain = activeAuctionChainConfig();
+    var input = $("#bidAmount");
+    var outputRow = $("[data-auction-output-row]");
+    var exactInputs = $("[data-auction-exact-inputs]");
+
+    auctionUiState.inputMode = next;
+    auctionUiState.derivedMintAmount = null;
+    auctionUiState.derivedQuote = null;
+
+    $all("[data-auction-mode]").forEach(function (btn) {
+      var active = btn.getAttribute("data-auction-mode") === next;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+
+    if (next === "spend") {
+      setText("[data-auction-input-label]", "Exact Input");
+      setText("[data-auction-input-meta-label]", "Estimated ENTEN output");
+      if (input) input.setAttribute("aria-label", "Exact ENTEN output amount");
+    } else {
+      setText("[data-auction-input-label]", "Exact Output");
+      setText("[data-auction-input-unit]", entenSymbolFor(chain));
+      setText("[data-auction-input-meta-label]", "ENTEN output amount");
+      if (input) input.setAttribute("aria-label", "Exact ENTEN output amount");
+    }
+
+    if (outputRow) outputRow.hidden = next === "spend";
+    if (exactInputs) exactInputs.hidden = next !== "spend";
+    if (input) input.value = "";
+    $all("[data-auction-exact-input]").forEach(function (assetInput) { assetInput.value = ""; });
+    setText("[data-auction-secondary-estimate]", "");
+    updateAuctionPaymentPreview();
+  }
+
+  function renderAuctionSpendAssetOptions(chain) {
+    var container = $("[data-auction-exact-inputs]");
+    var assets = auctionPaymentAssets(chain);
+    var previousValues = {};
+
+    if (!container) return;
+    $all("[data-auction-exact-input]").forEach(function (existingInput) {
+      var asset = existingInput.getAttribute("data-auction-exact-input");
+      if (isAddress(asset)) previousValues[asset.toLowerCase()] = existingInput.value;
+    });
+    container.innerHTML = "";
+
+    assets.forEach(function (asset) {
+      var row = document.createElement("div");
+      var label = document.createElement("div");
+      var wrap = document.createElement("div");
+      var input = document.createElement("input");
+      var unit = document.createElement("span");
+      var symbol = auctionAssetSymbol(chain, asset);
+
+      row.className = "exact-input-row";
+      label.className = "exact-input-label";
+      label.textContent = symbol + " input";
+      wrap.className = "amount-row";
+      input.className = "amount-input";
+      input.type = "number";
+      input.inputMode = "decimal";
+      input.placeholder = "0.00";
+      input.step = "any";
+      input.autocomplete = "off";
+      input.value = previousValues[String(asset).toLowerCase()] || "";
+      input.setAttribute("aria-label", "Exact input amount in " + symbol);
+      input.setAttribute("data-auction-exact-input", asset);
+      unit.className = "amount-unit";
+      unit.textContent = symbol;
+      wrap.appendChild(input);
+      wrap.appendChild(unit);
+      row.appendChild(label);
+      row.appendChild(wrap);
+      container.appendChild(row);
+    });
+
+    container.hidden = auctionInputMode() !== "spend";
+    $all("[data-auction-exact-input]").forEach(function (input) {
+      input.addEventListener("input", updateAuctionPaymentPreview);
+    });
   }
 
   function updateAuctionPaymentPreview() {
@@ -3269,38 +3520,133 @@ import {
     var amount = 0n;
     var decimals = auctionUiState.mintDecimals;
     var estimate = "Estimated spend: --";
+    var requestId;
+
+    if (auctionUiState.quoteTimer) {
+      window.clearTimeout(auctionUiState.quoteTimer);
+      auctionUiState.quoteTimer = null;
+    }
+
+    if (auctionInputMode() === "spend") {
+      updateAuctionSpendPreview(chain, input);
+      return;
+    }
+
+    auctionUiState.derivedMintAmount = null;
+    auctionUiState.derivedQuote = null;
+    setText("[data-auction-secondary-estimate]", "");
 
     if (input && input.value) {
       amount = parseUnits(input.value, decimals);
     }
 
-    if (auctionUiState.remainingLot !== null && amount > auctionUiState.remainingLot) {
-      estimate = "Exceeds available lot";
-    } else if (chain) {
-      estimate = paymentEstimateText(chain, amount);
+    if (amount <= 0n) {
+      auctionUiState.lastQuote = null;
+      setAuctionPreviewText(estimate);
+      return;
     }
 
-    setText("[data-auction-payment-estimate]", estimate);
-    setText("[data-auction-payment-total]", paymentEstimateValueText(estimate));
+    if (auctionUiState.remainingLot !== null && amount > auctionUiState.remainingLot) {
+      estimate = "Exceeds available liquidity";
+      auctionUiState.lastQuote = null;
+      setAuctionPreviewText(estimate);
+      return;
+    }
+
+    if (!chain || !auctionAddress(chain)) {
+      estimate = "Estimated spend unavailable";
+      setAuctionPreviewText(estimate);
+      return;
+    }
+
+    requestId = ++auctionUiState.quoteRequestId;
+    auctionUiState.quoteTimer = window.setTimeout(async function () {
+      var quote;
+      var quotedEstimate;
+
+      try {
+        quote = await readAuctionQuote(chain, amount);
+      } catch (error) {
+        if (requestId !== auctionUiState.quoteRequestId) return;
+        auctionUiState.lastQuote = null;
+        setAuctionPreviewText("Estimated spend unavailable");
+        return;
+      }
+
+      if (requestId !== auctionUiState.quoteRequestId) return;
+      auctionUiState.lastQuote = { amount: amount, payments: quote.payments };
+      quotedEstimate = paymentEstimateText(chain, quote.payments);
+      setAuctionPreviewText(quotedEstimate);
+    }, 250);
   }
 
-  function updateAuctionMaxControl() {
-    var hasRemaining = auctionUiState.remainingLot !== null && auctionUiState.remainingLot > 0n;
+  function updateAuctionSpendPreview(chain) {
+    var input = activeAuctionExactInput();
+    var asset = input ? input.getAttribute("data-auction-exact-input") : "";
+    var decimals = auctionAssetDecimals(chain, asset);
+    var spend = input && input.value ? parseUnits(input.value, decimals) : 0n;
+    var requestId;
 
-    $all("[data-auction-max-amount], [data-auction-buy-max]").forEach(function (button) {
-      button.disabled = !hasRemaining;
-    });
+    auctionUiState.lastQuote = null;
+    auctionUiState.derivedMintAmount = null;
+    auctionUiState.derivedQuote = null;
+
+    if (!spend || spend <= 0n) {
+      setAuctionPreviewText("Estimated spend: --");
+      setText("[data-auction-secondary-estimate]", "");
+      return;
+    }
+
+    if (!chain || !auctionAddress(chain) || !isAddress(asset)) {
+      setAuctionPreviewText("Estimated spend unavailable");
+      setText("[data-auction-secondary-estimate]", "");
+      return;
+    }
+
+    requestId = ++auctionUiState.quoteRequestId;
+    auctionUiState.quoteTimer = window.setTimeout(async function () {
+      var result;
+      var estimate;
+      var entenSym = entenSymbolFor(chain);
+
+      try {
+        result = await estimateAuctionMintForSpend(chain, spend, asset);
+      } catch (error) {
+        if (requestId !== auctionUiState.quoteRequestId) return;
+        setAuctionPreviewText("Estimated spend unavailable");
+        setText("[data-auction-secondary-estimate]", "Could not derive ENTEN output from exact input");
+        return;
+      }
+
+      if (requestId !== auctionUiState.quoteRequestId) return;
+      if (!result || !result.amount || result.amount <= 0n) {
+        setAuctionPreviewText("Estimated spend: --");
+        setText("[data-auction-secondary-estimate]", "Amount too small to receive " + entenSym);
+        return;
+      }
+
+      auctionUiState.derivedMintAmount = result.amount;
+      auctionUiState.derivedQuote = result.quote;
+      auctionUiState.lastQuote = { amount: result.amount, payments: result.quote.payments };
+
+      $all("[data-auction-exact-input]").forEach(function (assetInput) {
+        var paymentAsset = assetInput.getAttribute("data-auction-exact-input");
+        var payment = paymentForAsset(result.quote.payments, paymentAsset);
+        if (payment === null || assetInput === input) return;
+        assetInput.value = formatUnitsForInput(payment, auctionAssetDecimals(chain, paymentAsset));
+      });
+
+      setText(
+        "[data-auction-payment-total]",
+        groupedNumber(formatUnits(result.amount, auctionUiState.mintDecimals, 6)) + " " + entenSym
+      );
+      estimate = paymentEstimateText(chain, result.quote.payments);
+      setText("[data-auction-payment-estimate]", estimate);
+      setText("[data-auction-secondary-estimate]", "Required inputs: " + paymentEstimateValueText(estimate));
+    }, 250);
   }
 
-  function setAuctionAmountToMax() {
-    var input = $("#bidAmount");
-
-    if (!input || auctionUiState.remainingLot === null || auctionUiState.remainingLot <= 0n) return false;
-
-    input.value = formatUnitsForInput(auctionUiState.remainingLot, auctionUiState.mintDecimals);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    return true;
-  }
+  function updateAuctionMaxControl() {}
 
   function updatePresaleMaxControl() {
     var hasRemaining = presaleUiState.remainingLot !== null && presaleUiState.remainingLot > 0n;
@@ -3437,9 +3783,31 @@ import {
   async function auctionPrice(chain) {
     return normalizeAssetItems(
       await publicClientForChain(chain).readContract({
-        address: chain.auction.address,
+        address: auctionAddress(chain),
         abi: AUCTION_ABI,
-        functionName: "getPrice"
+        functionName: "getPrices"
+      })
+    );
+  }
+
+  function normalizeVirtualReserveQuote(result) {
+    var payments = result && (result.payments || result[0]);
+    var spotPrices = result && (result.spotPrices || result[1]);
+    var nextPremiums = result && (result.nextPremiums || result[2]);
+    return {
+      payments: normalizeAssetItems(payments),
+      spotPrices: (spotPrices || []).map(function (value) { return BigInt(value || 0); }),
+      nextPremiums: (nextPremiums || []).map(function (value) { return BigInt(value || 0); })
+    };
+  }
+
+  async function readAuctionQuote(chain, amount) {
+    return normalizeVirtualReserveQuote(
+      await publicClientForChain(chain).readContract({
+        address: auctionAddress(chain),
+        abi: AUCTION_ABI,
+        functionName: "quote",
+        args: [amount]
       })
     );
   }
@@ -3488,15 +3856,42 @@ import {
     };
   }
 
+  async function readAuctionVaultAddress(chain) {
+    var client = publicClientForChain(chain);
+    var controller = await client.readContract({
+      address: auctionAddress(chain),
+      abi: AUCTION_ABI,
+      functionName: "CONTROLLER"
+    });
+
+    if (!isAddress(controller)) return "";
+
+    return client.readContract({
+      address: controller,
+      abi: CONTROLLER_VIEW_ABI,
+      functionName: "VAULT"
+    });
+  }
+
   async function ensureAuctionPaymentApprovals(chain, payments) {
-    var vaultAddress = chain && chain.auction ? chain.auction.vaultAddress : "";
+    var vaultAddress = auctionUiState.vaultAddress || (chain && chain.auction ? chain.auction.vaultAddress : "");
     var requiredPayments = payments.filter(function (payment) {
       return payment.amount > 0n && isAddress(payment.address) && !isNativeAssetAddress(payment.address);
     });
 
     if (!requiredPayments.length) return true;
+
     if (!isAddress(vaultAddress)) {
-      setStatus("[data-page-status]", "Configure the vault address before enabling auction approvals.", "warn");
+      try {
+        vaultAddress = await readAuctionVaultAddress(chain);
+        auctionUiState.vaultAddress = isAddress(vaultAddress) ? vaultAddress : "";
+      } catch (error) {
+        vaultAddress = "";
+      }
+    }
+
+    if (!isAddress(vaultAddress)) {
+      setStatus("[data-page-status]", "Could not resolve the vault spender before enabling virtual reserve approvals.", "warn");
       return false;
     }
 
@@ -3533,7 +3928,7 @@ import {
       setStatus("[data-page-status]", "Waiting for " + display.unit + " approval...", "warn");
       receipt = await waitForTransaction(txHash);
       if (!receipt) {
-        setStatus("[data-page-status]", display.unit + " approval is still pending. Try buying again after it confirms.", "warn");
+        setStatus("[data-page-status]", display.unit + " approval is still pending. Try swapping again after it confirms.", "warn");
         return false;
       }
       if (receipt.status === "0x0") {
@@ -3545,17 +3940,16 @@ import {
     return true;
   }
 
-  function buildAuctionBuyData(epochId, deadline, mintAmount, maxPayments) {
+  function buildAuctionBuyData(deadline, mintAmount, maxPayments) {
     return encodeFunctionData({
       abi: AUCTION_ABI,
       functionName: "buy",
       args: [
-        epochId,
-        deadline,
         mintAmount,
         maxPayments.map(function (payment) {
           return [payment.address, payment.amount];
-        })
+        }),
+        deadline
       ]
     });
   }
@@ -3565,54 +3959,82 @@ import {
     var input = $("#bidAmount");
     var amount;
     var auctionTx;
+    var bps;
     var deadline;
-    var epochId;
-    var prices;
+    var quote;
     var maxPayments;
     var receipt;
     var txHash;
 
-    if (!chain || !chain.auction || !isAddress(chain.auction.address)) {
-      setStatus("[data-page-status]", "Configure the auction contract address before enabling buys.", "warn");
+    if (!chain || !auctionAddress(chain)) {
+      setStatus("[data-page-status]", "Configure the virtual reserve contract address before enabling buys.", "warn");
       return;
     }
 
-    amount = parseUnits(input ? input.value : "", chain.auction.mintDecimals === undefined ? 18 : chain.auction.mintDecimals);
-    updateAuctionPaymentPreview();
+    if (auctionInputMode() === "spend") {
+      var exactInput = activeAuctionExactInput();
+      var spendAsset = exactInput ? exactInput.getAttribute("data-auction-exact-input") : "";
+      var spendAmount = parseUnits(exactInput ? exactInput.value : "", auctionAssetDecimals(chain, spendAsset));
+      var derived;
+
+      if (spendAmount <= 0n || !isAddress(spendAsset)) {
+        setStatus("[data-page-status]", "Enter an exact input amount.", "warn");
+        return;
+      }
+
+      setStatus("[data-page-status]", "Deriving ENTEN output from exact input...", "warn");
+      try {
+        if (
+          auctionUiState.derivedMintAmount &&
+          auctionUiState.derivedQuote &&
+          paymentForAsset(auctionUiState.derivedQuote.payments, spendAsset) !== null &&
+          paymentForAsset(auctionUiState.derivedQuote.payments, spendAsset) <= spendAmount
+        ) {
+          amount = auctionUiState.derivedMintAmount;
+          quote = auctionUiState.derivedQuote;
+        } else {
+          derived = await estimateAuctionMintForSpend(chain, spendAmount, spendAsset);
+          amount = derived ? derived.amount : 0n;
+          quote = derived ? derived.quote : null;
+        }
+      } catch (error) {
+        setStatus("[data-page-status]", "Could not derive ENTEN output from that exact input.", "warn");
+        return;
+      }
+    } else {
+      amount = parseUnits(input ? input.value : "", chain.auction.mintDecimals === undefined ? 18 : chain.auction.mintDecimals);
+      updateAuctionPaymentPreview();
+    }
 
     if (amount <= 0n) {
-      setStatus("[data-page-status]", "Enter a mint amount.", "warn");
+      setStatus("[data-page-status]", auctionInputMode() === "spend" ? "Exact input is too small to output ENTEN." : "Enter an exact output amount.", "warn");
       return;
     }
 
     if (auctionUiState.remainingLot !== null && amount > auctionUiState.remainingLot) {
-      setStatus("[data-page-status]", "Amount exceeds the remaining lot. Use Max or enter a smaller amount.", "warn");
+      setStatus("[data-page-status]", "Amount exceeds the currently available virtual reserve liquidity. Use Max or enter a smaller amount.", "warn");
       return;
     }
 
-    setStatus("[data-page-status]", "Reading auction epoch and price...", "warn");
-    try {
-      var auctionReads = await Promise.all([
-        publicClientForChain(chain).readContract({
-          address: chain.auction.address,
-          abi: AUCTION_ABI,
-          functionName: "epochId"
-        }),
-        auctionPrice(chain)
-      ]);
-      epochId = auctionReads[0];
-      prices = auctionReads[1];
-    } catch (error) {
-      setStatus("[data-page-status]", "Could not read auction epoch or price.", "warn");
+    if (!quote) {
+      setStatus("[data-page-status]", "Reading virtual reserve quote...", "warn");
+      try {
+        quote = await readAuctionQuote(chain, amount);
+      } catch (error) {
+        setStatus("[data-page-status]", "Could not quote the virtual reserve buy: " + simulationFailureMessage(error), "warn");
+        return;
+      }
+    }
+
+    if (!quote.payments.length) {
+      setStatus("[data-page-status]", "Virtual reserve quote returned no payment assets.", "warn");
       return;
     }
 
-    if (!prices.length) {
-      setStatus("[data-page-status]", "Auction price returned no payment assets.", "warn");
-      return;
-    }
-
-    maxPayments = paymentsForMintAmount(prices, amount, chain.auction.mintDecimals === undefined ? 18 : chain.auction.mintDecimals);
+    bps = Number((chain.auction && chain.auction.maxPaymentBufferBps) || 50);
+    maxPayments = quote.payments.map(function (payment) {
+      return { address: payment.address, amount: paymentAmountWithBuffer(payment.amount, bps) };
+    });
     deadline = BigInt(Math.floor(Date.now() / 1000) + (chain.auction.deadlineSeconds || 1200));
 
     if (!(await ensureAuctionPaymentApprovals(chain, maxPayments))) {
@@ -3621,20 +4043,20 @@ import {
 
     auctionTx = {
       from: state.account,
-      to: chain.auction.address,
-      data: buildAuctionBuyData(epochId, deadline, amount, maxPayments),
+      to: auctionAddress(chain),
+      data: buildAuctionBuyData(deadline, amount, maxPayments),
       value: "0x0"
     };
 
-    setStatus("[data-page-status]", "Simulating auction buy...", "warn");
+    setStatus("[data-page-status]", "Simulating virtual reserve buy...", "warn");
     try {
       await simulateTransaction(auctionTx, chain);
     } catch (error) {
-      setStatus("[data-page-status]", "Auction preflight failed: " + simulationFailureMessage(error), "warn");
+      setStatus("[data-page-status]", "Virtual reserve preflight failed: " + simulationFailureMessage(error), "warn");
       return;
     }
 
-    setStatus("[data-page-status]", "Submitting auction buy transaction...", "warn");
+    setStatus("[data-page-status]", "Submitting virtual reserve buy transaction...", "warn");
     txHash = await sendTransaction(auctionTx, chain);
 
     setStatus("[data-page-status]", "Buy submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
@@ -3642,16 +4064,257 @@ import {
 
     receipt = await waitForTransaction(txHash, chain);
     if (!receipt) {
-      setStatus("[data-page-status]", "Buy submitted and still pending. Auction data will refresh again after confirmation.", "warn");
+      setStatus("[data-page-status]", "Buy submitted and still pending. Virtual reserve data will refresh again after confirmation.", "warn");
       return;
     }
     if (receipt.status === "0x0") {
-      setStatus("[data-page-status]", "Auction buy reverted.", "warn");
+      setStatus("[data-page-status]", "Virtual reserve buy reverted.", "warn");
       loadAuctionData();
       return;
     }
 
     setStatus("[data-page-status]", "Buy confirmed: " + txHash.slice(0, 10) + "...", "ok");
+    loadAuctionData();
+  }
+
+  function auctionSide() {
+    return auctionUiState.side === "sell" ? "sell" : "buy";
+  }
+
+  function setAuctionSide(side) {
+    var next = side === "sell" ? "sell" : "buy";
+    var buyPanel = $("[data-auction-buy-panel]");
+    var sellPanel = $("[data-auction-sell-panel]");
+
+    auctionUiState.side = next;
+
+    $all("[data-auction-side]").forEach(function (btn) {
+      var active = btn.getAttribute("data-auction-side") === next;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+
+    if (buyPanel) buyPanel.hidden = next !== "buy";
+    if (sellPanel) sellPanel.hidden = next !== "sell";
+
+    if (next === "sell") {
+      setText("[data-auction-sell-unit]", entenSymbolFor(activeAuctionChainConfig()));
+      updateAuctionSellPreview();
+      updateAuctionPriceCompare();
+    } else {
+      updateAuctionPaymentPreview();
+    }
+  }
+
+  async function readRedemptionValue(chain, amount) {
+    return normalizeAssetItems(
+      await publicClientForChain(chain).readContract({
+        address: auctionAddress(chain),
+        abi: AUCTION_ABI,
+        functionName: "redemptionValue",
+        args: [amount]
+      })
+    );
+  }
+
+  function formatReceiptsList(chain, items) {
+    var nonzero = (items || []).filter(function (item) { return item.amount > 0n; });
+    if (!nonzero.length) return "--";
+    return nonzero
+      .map(function (item) {
+        var display = assetDisplay(chain, item, 6);
+        return display.value + " " + display.unit;
+      })
+      .join(" + ");
+  }
+
+  function updateAuctionSellPreview() {
+    var chain = activeAuctionChainConfig();
+    var input = $("[data-auction-sell-input]");
+    var amount = 0n;
+    var requestId;
+
+    if (auctionUiState.sellQuoteTimer) {
+      window.clearTimeout(auctionUiState.sellQuoteTimer);
+      auctionUiState.sellQuoteTimer = null;
+    }
+
+    auctionUiState.redemptionProceeds = null;
+
+    if (input && input.value) {
+      amount = parseUnits(input.value, auctionUiState.mintDecimals);
+    }
+
+    if (amount <= 0n) {
+      setText("[data-auction-sell-proceeds]", "You receive: --");
+      return;
+    }
+
+    if (!chain || !auctionAddress(chain)) {
+      setText("[data-auction-sell-proceeds]", "You receive: unavailable");
+      return;
+    }
+
+    setText("[data-auction-sell-proceeds]", "You receive: ...");
+    requestId = ++auctionUiState.sellQuoteRequestId;
+    auctionUiState.sellQuoteTimer = window.setTimeout(async function () {
+      var proceeds;
+
+      try {
+        proceeds = await readRedemptionValue(chain, amount);
+      } catch (error) {
+        if (requestId !== auctionUiState.sellQuoteRequestId) return;
+        setText("[data-auction-sell-proceeds]", "You receive: unavailable");
+        return;
+      }
+
+      if (requestId !== auctionUiState.sellQuoteRequestId) return;
+      auctionUiState.redemptionProceeds = { amount: amount, proceeds: proceeds };
+      setText("[data-auction-sell-proceeds]", "You receive: " + formatReceiptsList(chain, proceeds));
+    }, 250);
+  }
+
+  function setCompareBest(which) {
+    var reserveRow = $("[data-auction-reserve-compare]");
+    var poolRow = $("[data-auction-pool-compare]");
+    if (reserveRow) reserveRow.setAttribute("data-better", which === "reserve" ? "true" : "false");
+    if (poolRow) poolRow.setAttribute("data-better", which === "pool" ? "true" : "false");
+  }
+
+  // Per-ENTEN comparison shown in sell mode: the reserve's redemption value (pure
+  // backing floor that {sell} pays) versus the live Kumbaya pool price, both in USD,
+  // with the higher (better for the seller) side flagged.
+  function updateAuctionPriceCompare() {
+    var chain = activeAuctionChainConfig();
+    var enten = outputTokenConfig(chain);
+    var requestId = ++auctionUiState.priceCompareRequestId;
+
+    setText("[data-auction-reserve-price]", "...");
+    setText("[data-auction-pool-price]", "...");
+    setCompareBest(null);
+
+    if (!chain || !auctionAddress(chain) || !enten || !isAddress(enten.address)) {
+      setText("[data-auction-reserve-price]", "--");
+      setText("[data-auction-pool-price]", "--");
+      return;
+    }
+
+    (async function () {
+      var reserveUsd = null;
+      var poolUsd = null;
+
+      try {
+        reserveUsd = await entenBackingUsdValue(chain, enten);
+      } catch (error) {
+        reserveUsd = null;
+      }
+
+      try {
+        poolUsd = await readAssetUsdPrice(chain, enten.address);
+      } catch (error) {
+        poolUsd = null;
+      }
+
+      if (requestId !== auctionUiState.priceCompareRequestId) return;
+
+      setText("[data-auction-reserve-price]", reserveUsd ? formatUsdPrice(reserveUsd) + " / ENTEN" : "--");
+      setText("[data-auction-pool-price]", poolUsd ? formatUsdPrice(poolUsd) + " / ENTEN" : "--");
+
+      if (reserveUsd && poolUsd && reserveUsd.amount !== poolUsd.amount) {
+        setCompareBest(reserveUsd.amount > poolUsd.amount ? "reserve" : "pool");
+      } else {
+        setCompareBest(null);
+      }
+    })();
+  }
+
+  async function submitAuctionSell() {
+    var chain = currentChainConfig();
+    var input = $("[data-auction-sell-input]");
+    var amount;
+    var proceeds;
+    var minProceeds;
+    var bps;
+    var deadline;
+    var sellTx;
+    var receipt;
+    var txHash;
+
+    if (!chain || !auctionAddress(chain)) {
+      setStatus("[data-page-status]", "Configure the virtual reserve contract address before enabling sells.", "warn");
+      return;
+    }
+
+    amount = parseUnits(input ? input.value : "", auctionUiState.mintDecimals);
+    if (amount <= 0n) {
+      setStatus("[data-page-status]", "Enter an ENTEN amount to redeem.", "warn");
+      return;
+    }
+
+    setStatus("[data-page-status]", "Reading redemption value...", "warn");
+    try {
+      if (auctionUiState.redemptionProceeds && auctionUiState.redemptionProceeds.amount === amount) {
+        proceeds = auctionUiState.redemptionProceeds.proceeds;
+      } else {
+        proceeds = await readRedemptionValue(chain, amount);
+      }
+    } catch (error) {
+      setStatus("[data-page-status]", "Could not read the redemption value: " + simulationFailureMessage(error), "warn");
+      return;
+    }
+
+    if (!proceeds.length) {
+      setStatus("[data-page-status]", "Redemption returned no proceeds.", "warn");
+      return;
+    }
+
+    // minProceeds must mirror proceeds index-for-index (the contract checks asset
+    // equality per slot); apply a slippage floor so a small backing change can't revert.
+    bps = Number((chain.auction && (chain.auction.minProceedsBufferBps || chain.auction.maxPaymentBufferBps)) || 50);
+    minProceeds = proceeds.map(function (item) {
+      return { address: item.address, amount: applySlippage(item.amount, bps) };
+    });
+    deadline = BigInt(Math.floor(Date.now() / 1000) + ((chain.auction && chain.auction.deadlineSeconds) || 1200));
+
+    sellTx = {
+      from: state.account,
+      to: auctionAddress(chain),
+      data: encodeFunctionData({
+        abi: AUCTION_ABI,
+        functionName: "sell",
+        args: [amount, minProceeds.map(function (item) { return [item.address, item.amount]; }), deadline]
+      }),
+      value: "0x0"
+    };
+
+    setStatus("[data-page-status]", "Simulating reserve sell...", "warn");
+    try {
+      await simulateTransaction(sellTx, chain);
+    } catch (error) {
+      setStatus("[data-page-status]", "Sell preflight failed: " + simulationFailureMessage(error), "warn");
+      return;
+    }
+
+    setStatus("[data-page-status]", "Submitting reserve sell transaction...", "warn");
+    txHash = await sendTransaction(sellTx, chain);
+
+    setStatus("[data-page-status]", "Sell submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
+    refreshAuctionDataSoon();
+
+    receipt = await waitForTransaction(txHash, chain);
+    if (!receipt) {
+      setStatus("[data-page-status]", "Sell submitted and still pending. Reserve data will refresh after confirmation.", "warn");
+      return;
+    }
+    if (receipt.status === "0x0") {
+      setStatus("[data-page-status]", "Reserve sell reverted.", "warn");
+      loadAuctionData();
+      return;
+    }
+
+    setStatus("[data-page-status]", "Sell confirmed: " + txHash.slice(0, 10) + "...", "ok");
+    if (input) input.value = "";
+    updateAuctionSellPreview();
     loadAuctionData();
   }
 
@@ -3962,52 +4625,8 @@ import {
   }
 
   async function submitStartNextAuction() {
-    var chain = currentChainConfig();
-    var receipt;
-    var startTx;
-    var txHash;
-
-    if (!chain || !chain.auction || !isAddress(chain.auction.address)) {
-      setStatus("[data-page-status]", "Configure the auction contract address before starting the next auction.", "warn");
-      return;
-    }
-
-    startTx = {
-      from: state.account,
-      to: chain.auction.address,
-      data: encodeFunctionData({
-        abi: AUCTION_ABI,
-        functionName: "startNextAuction"
-      }),
-      value: "0x0"
-    };
-
-    setStatus("[data-page-status]", "Simulating next auction start...", "warn");
-    try {
-      await simulateTransaction(startTx, chain);
-    } catch (error) {
-      setStatus("[data-page-status]", "Start preflight failed: " + simulationFailureMessage(error), "warn");
-      return;
-    }
-
-    setStatus("[data-page-status]", "Submitting next auction start...", "warn");
-    txHash = await sendTransaction(startTx, chain);
-    setStatus("[data-page-status]", "Start submitted: " + txHash.slice(0, 10) + "... waiting for confirmation.", "ok");
-    refreshAuctionDataSoon();
-
-    receipt = await waitForTransaction(txHash, chain);
-    if (!receipt) {
-      setStatus("[data-page-status]", "Start submitted and still pending. Auction data will refresh again after confirmation.", "warn");
-      return;
-    }
-    if (receipt.status === "0x0") {
-      setStatus("[data-page-status]", "Start next auction reverted.", "warn");
-      loadAuctionData();
-      return;
-    }
-
-    setStatus("[data-page-status]", "Next auction started: " + txHash.slice(0, 10) + "...", "ok");
-    loadAuctionData();
+    setStartNextAuctionVisible(false);
+    setStatus("[data-page-status]", "Virtual reserve markets do not use epochs, so there is no next auction to start.", "warn");
   }
 
   function launchInputs() {
@@ -4536,34 +5155,40 @@ import {
   async function loadAuctionData() {
     var chain = activeAuctionChainConfig();
     var auction = chain ? chain.auction : null;
+    var address = auctionAddress(chain);
     var client;
     var calls;
     var results = {};
-    var endTime;
-    var soldOut = false;
+    var reserveItems = [];
+    var minReserve = null;
+    var vaultAddress;
 
-    if (!chain || !auction || !isAddress(auction.address)) {
+    if (!chain || !auction || !address) {
       auctionUiState.remainingLot = null;
       auctionUiState.prices = [];
       auctionUiState.chainId = "";
+      auctionUiState.registeredAssets = [];
+      auctionUiState.totalMinted = null;
       setStartNextAuctionVisible(false);
+      setText("[data-auction-epoch-label]", "Virtual Reserve Pending");
+      renderAuctionSpendAssetOptions(chain);
+      setStatus("[data-page-status]", "Configure the VirtualReservePool contract address to enable this market.", "warn");
       updateAuctionMaxControl();
       updateAuctionPaymentPreview();
       return;
     }
 
     calls = [
-      { key: "price", address: auction.address, abi: AUCTION_ABI, functionName: "getPrice", normalize: normalizeAssetItems },
-      { key: "epochId", address: auction.address, abi: AUCTION_ABI, functionName: "epochId" },
-      { key: "remaining", address: auction.address, abi: AUCTION_ABI, functionName: "remainingLot" },
-      { key: "lotSize", address: auction.address, abi: AUCTION_ABI, functionName: "LOT_SIZE" },
-      { key: "start", address: auction.address, abi: AUCTION_ABI, functionName: "startTime" },
-      { key: "period", address: auction.address, abi: AUCTION_ABI, functionName: "epochPeriod" }
+      { key: "price", address: address, abi: AUCTION_ABI, functionName: "getPrices", normalize: normalizeAssetItems },
+      { key: "start", address: address, abi: AUCTION_ABI, functionName: "startTime" },
+      { key: "totalMinted", address: address, abi: AUCTION_ABI, functionName: "totalMinted" },
+      { key: "assets", address: address, abi: AUCTION_ABI, functionName: "registeredAssets" },
+      { key: "halfLife", address: address, abi: AUCTION_ABI, functionName: "HALF_LIFE" },
+      { key: "resetThreshold", address: address, abi: AUCTION_ABI, functionName: "RESET_THRESHOLD_BPS" },
+      { key: "resetTarget", address: address, abi: AUCTION_ABI, functionName: "RESET_TARGET_BPS" },
+      { key: "minPremium", address: address, abi: AUCTION_ABI, functionName: "MIN_PREMIUM_BPS" },
+      { key: "controller", address: address, abi: AUCTION_ABI, functionName: "CONTROLLER" }
     ];
-
-    if (isAddress(auction.vaultAddress)) {
-      calls.push({ key: "backing", address: auction.vaultAddress, abi: VAULT_ABI, functionName: "backingBalances", normalize: normalizeAssetItems });
-    }
 
     client = publicClientForChain(chain);
 
@@ -4605,45 +5230,131 @@ import {
     auctionUiState.prices = results.price || [];
     auctionUiState.mintDecimals = auction.mintDecimals === undefined ? 18 : auction.mintDecimals;
     auctionUiState.chainId = chain.chainId;
+    auctionUiState.registeredAssets = Array.isArray(results.assets) ? results.assets.filter(isAddress) : [];
+    auctionUiState.totalMinted = results.totalMinted === null || results.totalMinted === undefined ? null : BigInt(results.totalMinted);
+    renderAuctionSpendAssetOptions(chain);
+
+    if (auctionUiState.registeredAssets.length) {
+      try {
+        var reserveResults = await client.multicall({
+          allowFailure: true,
+          contracts: auctionUiState.registeredAssets.map(function (asset) {
+            return { address: address, abi: AUCTION_ABI, functionName: "reserveOf", args: [asset] };
+          })
+        });
+        reserveItems = reserveResults
+          .map(function (result, index) {
+            if (!result || result.status !== "success") return null;
+            return { address: auctionUiState.registeredAssets[index], amount: BigInt(result.result || 0) };
+          })
+          .filter(Boolean);
+      } catch (error) {
+        reserveItems = [];
+      }
+    }
+
+    reserveItems.forEach(function (item) {
+      if (minReserve === null || item.amount < minReserve) minReserve = item.amount;
+    });
 
     setAssetMetric("[data-auction-currentPrice]", "[data-auction-currentPrice-unit]", chain, results.price, "--", "");
 
-    if (results.epochId !== null && results.epochId !== undefined) {
-      setText("[data-auction-epoch-label]", "Epoch " + results.epochId.toString().padStart(3, "0") + " Active");
+    if (results.start !== null && results.start !== undefined && BigInt(results.start) > 0n) {
+      setText("[data-auction-epoch-label]", "Virtual Reserve Live");
+      setText("[data-auction-timeLeft]", "Live");
+      setText("[data-auction-timeLeft-unit]", "continuous");
+      setStatus("[data-page-status]", "Virtual reserve market is live. Quotes refresh from the contract.", "ok");
+    } else {
+      setText("[data-auction-epoch-label]", "Virtual Reserve Pending");
+      setText("[data-auction-timeLeft]", "--");
+      setText("[data-auction-timeLeft-unit]", "not open");
     }
+    setStartNextAuctionVisible(false);
 
-    if (results.remaining !== null && results.remaining !== undefined) {
-      auctionUiState.remainingLot = results.remaining;
-      soldOut = results.remaining <= 0n;
-      setText("[data-auction-amountLeft]", formatUnitsCompact(results.remaining, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
+    if (minReserve !== null && minReserve > 0n) {
+      auctionUiState.remainingLot = minReserve - 1n;
+      setText("[data-auction-amountLeft]", formatUnitsCompact(auctionUiState.remainingLot, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
       setText("[data-auction-amountLeft-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
     } else {
       auctionUiState.remainingLot = null;
+      setText("[data-auction-amountLeft]", "--");
+      setText("[data-auction-amountLeft-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
     }
 
-    if (results.lotSize !== null && results.lotSize !== undefined) {
-      if (results.remaining !== null && results.remaining !== undefined) {
-        var tokensSold = results.lotSize > results.remaining ? results.lotSize - results.remaining : 0n;
-        setText("[data-auction-tokensSold]", formatUnitsCompact(tokensSold, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
-        setText("[data-auction-tokensSold-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
-      }
-      setText("[data-auction-epochAllocation]", formatUnitsCompact(results.lotSize, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
+    if (auctionUiState.totalMinted !== null) {
+      setText("[data-auction-tokensSold]", formatUnitsCompact(auctionUiState.totalMinted, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
+      setText("[data-auction-tokensSold-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
+      setText("[data-auction-epochAllocation]", formatUnitsCompact(auctionUiState.totalMinted, auction.mintDecimals === undefined ? 18 : auction.mintDecimals));
       setText("[data-auction-epochAllocation-unit]", chain.tokens && chain.tokens.enten ? chain.tokens.enten.symbol : "ENTEN");
     }
 
-    if (results.start !== null && results.start !== undefined && results.period !== null && results.period !== undefined) {
-      endTime = results.start + results.period;
-      startAuctionCountdown(endTime, soldOut);
-    } else {
-      setStartNextAuctionVisible(soldOut);
+    vaultAddress = auctionUiState.vaultAddress || (auction && auction.vaultAddress);
+    if (!isAddress(vaultAddress) && isAddress(results.controller)) {
+      try {
+        vaultAddress = await client.readContract({
+          address: results.controller,
+          abi: CONTROLLER_VIEW_ABI,
+          functionName: "VAULT"
+        });
+        auctionUiState.vaultAddress = isAddress(vaultAddress) ? vaultAddress : "";
+      } catch (error) {
+        vaultAddress = "";
+      }
     }
 
-    if (results.backing) {
-      setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, results.backing, "--", "");
+    if (isAddress(vaultAddress)) {
+      try {
+        var backing = normalizeAssetItems(
+          await client.readContract({ address: vaultAddress, abi: VAULT_ABI, functionName: "backingBalances" })
+        );
+        var kernelAddress = "";
+        (auctionUiState.registeredAssets || []).forEach(function (asset) {
+          var exists = backing.some(function (item) { return item.address.toLowerCase() === asset.toLowerCase(); });
+          if (!exists) backing.push({ address: asset, amount: 0n });
+        });
+        if (isAddress(results.controller)) {
+          try {
+            kernelAddress = await client.readContract({
+              address: results.controller,
+              abi: CONTROLLER_VIEW_ABI,
+              functionName: "KERNEL"
+            });
+          } catch (kernelError) {
+            kernelAddress = "";
+          }
+        }
+        if (isAddress(kernelAddress) && backing.length) {
+          try {
+            var borrowedResults = await client.multicall({
+              allowFailure: true,
+              contracts: backing.map(function (item) {
+                return {
+                  address: kernelAddress,
+                  abi: KERNEL_VIEW_ABI,
+                  functionName: "viewData",
+                  args: [backingStateSlots(item.address)]
+                };
+              })
+            });
+            backing = backing.map(function (item, index) {
+              var stateResult = borrowedResults[index];
+              var stateValues = stateResult && stateResult.status === "success" ? stateResult.result : null;
+              var borrowed = Array.isArray(stateValues) && stateValues.length > 1 ? BigInt(stateValues[1]) : 0n;
+              return { address: item.address, amount: item.amount + borrowed };
+            });
+          } catch (borrowedError) {
+            // Fall back to vault-held backing if borrowed-state reads fail.
+          }
+        }
+        setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, backing, "--", "");
+      } catch (error) {
+        setAssetMetric("[data-auction-totalBacking]", "[data-auction-totalBacking-unit]", chain, null, "--", "");
+      }
     }
 
     updateAuctionMaxControl();
     updateAuctionPaymentPreview();
+    if (auctionSide() === "sell") updateAuctionPriceCompare();
   }
 
   function updateNav() {
@@ -4800,10 +5511,10 @@ import {
     var chain = currentChainConfig();
     var targetChain = activeAuctionChainConfig();
 
-    if (chain && chain.auction && isAddress(chain.auction.address)) return true;
+    if (auctionAddress(chain)) return true;
 
     if (!targetChain) {
-      setStatus("[data-page-status]", "Auction is not configured on a supported network yet.", "warn");
+      setStatus("[data-page-status]", "Virtual reserve is not configured on a supported network yet.", "warn");
       return false;
     }
 
@@ -5001,8 +5712,6 @@ import {
   function bindAuctionPage() {
     var form = $("[data-auction-form]");
     var amountInput = $("#bidAmount");
-    var maxButton = $("[data-auction-max-amount]");
-    var buyMaxButton = $("[data-auction-buy-max]");
     var startNextButton = $("[data-auction-start-next]");
     if (IS_PRESALE_PAGE) return;
     if (!form) return;
@@ -5011,46 +5720,46 @@ import {
     loadAuctionData();
     startAuctionAutoRefresh();
 
+    var sellInput = $("[data-auction-sell-input]");
+
     if (amountInput) {
       amountInput.addEventListener("input", updateAuctionPaymentPreview);
     }
 
-    if (maxButton) {
-      maxButton.addEventListener("click", function () {
-        if (!setAuctionAmountToMax()) return;
+    if (sellInput) {
+      sellInput.addEventListener("input", updateAuctionSellPreview);
+    }
+
+    $all("[data-auction-mode]").forEach(function (modeBtn) {
+      modeBtn.addEventListener("click", function () {
+        setAuctionInputMode(modeBtn.getAttribute("data-auction-mode"));
         if (amountInput) amountInput.focus();
       });
-    }
+    });
 
-    if (buyMaxButton) {
-      buyMaxButton.addEventListener("click", async function () {
-        if (!setAuctionAmountToMax()) {
-          setStatus("[data-page-status]", "No remaining lot is available to acquire.", "warn");
-          return;
-        }
-
-        if (!state.account && !(await connectWallet())) return;
-        if (!(await ensureAuctionNetwork("buying the remaining lot"))) return;
-
-        buyMaxButton.disabled = true;
-        try {
-          await submitAuctionBuy();
-        } catch (error) {
-          setStatus("[data-page-status]", "Max auction purchase failed or was rejected.", "warn");
-        } finally {
-          updateAuctionMaxControl();
-        }
+    $all("[data-auction-side]").forEach(function (sideBtn) {
+      sideBtn.addEventListener("click", function () {
+        setAuctionSide(sideBtn.getAttribute("data-auction-side"));
       });
-    }
+    });
+
+    setAuctionInputMode(auctionUiState.inputMode);
+    setAuctionSide(auctionUiState.side);
 
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
 
+      var selling = auctionSide() === "sell";
+
       if (!state.account && !(await connectWallet())) return;
-      if (!(await ensureAuctionNetwork("buying"))) return;
+      if (!(await ensureAuctionNetwork(selling ? "selling" : "swapping"))) return;
 
       try {
-        await submitAuctionBuy();
+        if (selling) {
+          await submitAuctionSell();
+        } else {
+          await submitAuctionBuy();
+        }
       } catch (error) {
         setStatus("[data-page-status]", "Auction transaction failed or was rejected.", "warn");
       }
